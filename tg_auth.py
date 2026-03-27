@@ -1,9 +1,8 @@
 """
 tg_auth.py — ThrottleGuard User Authentication
 
-Simple, practical auth for a diesel technician audience.
-Stores users in the same SQLite DB as predictions (predictions.db).
-No external dependencies — uses hashlib (built-in) with salt for password hashing.
+Stores users in Supabase PostgreSQL (via DATABASE_URL env var).
+Uses hashlib + per-user salt for password hashing — no external auth deps.
 
 Roles
 -----
@@ -13,22 +12,22 @@ Viewer     — read-only: view results and history, no uploads
 
 First Run
 ---------
-On first launch, a default admin account is created:
-  Username: admin
-  Password: throttleguard2024
+On first launch, a default admin account is created.
+Set TG_ADMIN_PASSWORD env var before first deploy — Railway Variables panel.
 Admin should change this password immediately in the user management panel.
 """
 
 import hashlib
 import os
 import secrets
-import sqlite3
-import pathlib
+import psycopg2
+import psycopg2.extras
+import psycopg2.errorcodes
 from datetime import datetime
 
 import streamlit as st
 
-DB_PATH = pathlib.Path(__file__).parent / "predictions.db"
+from tg_db import get_conn
 
 # ── Role permissions ──────────────────────────────────────────────────────────
 # Maps role name → set of allowed actions. Check with can_do(action).
@@ -43,13 +42,13 @@ ROLE_PERMISSIONS = {
 
 CREATE_USERS_SQL = """
 CREATE TABLE IF NOT EXISTS tg_users (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    username     TEXT    NOT NULL UNIQUE,
-    password_hash TEXT   NOT NULL,
-    salt         TEXT    NOT NULL,
-    role         TEXT    NOT NULL DEFAULT 'Viewer',
-    created_at   TEXT    NOT NULL,
-    last_login   TEXT
+    id            SERIAL PRIMARY KEY,
+    username      TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    salt          TEXT NOT NULL,
+    role          TEXT NOT NULL DEFAULT 'Viewer',
+    created_at    TEXT NOT NULL,
+    last_login    TEXT
 );
 """
 
@@ -72,33 +71,30 @@ def _hash_password(password: str, salt: str) -> str:
     return hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
 
 
-def _get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
 def init_auth_db() -> None:
     """
-    Create the users table and seed a default admin account if no users exist.
+    Create the tg_users table and seed a default admin account if empty.
     Called once at app startup.
     """
-    with _get_conn() as conn:
-        conn.execute(CREATE_USERS_SQL)
-        conn.commit()
+    conn = get_conn()
+    try:
+        with conn:
+            cur = conn.cursor()
+            cur.execute(CREATE_USERS_SQL)
 
-        # Only create the default admin if the table is completely empty
-        count = conn.execute("SELECT COUNT(*) FROM tg_users").fetchone()[0]
-        if count == 0:
-            salt = secrets.token_hex(16)
-            pw_hash = _hash_password(DEFAULT_ADMIN_PASSWORD, salt)
-            conn.execute(
-                "INSERT INTO tg_users (username, password_hash, salt, role, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (DEFAULT_ADMIN_USERNAME, pw_hash, salt, "Admin", datetime.utcnow().isoformat()),
-            )
-            conn.commit()
-            print("[ThrottleGuard Auth] Default admin account created — change password on first login.")
+            cur.execute("SELECT COUNT(*) FROM tg_users")
+            count = cur.fetchone()[0]
+            if count == 0:
+                salt    = secrets.token_hex(16)
+                pw_hash = _hash_password(DEFAULT_ADMIN_PASSWORD, salt)
+                cur.execute(
+                    "INSERT INTO tg_users (username, password_hash, salt, role, created_at) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (DEFAULT_ADMIN_USERNAME, pw_hash, salt, "Admin", datetime.utcnow().isoformat()),
+                )
+                print("[ThrottleGuard Auth] Default admin account created — change password on first login.")
+    finally:
+        conn.close()
 
 
 def verify_login(username: str, password: str) -> dict | None:
@@ -106,26 +102,27 @@ def verify_login(username: str, password: str) -> dict | None:
     Check credentials. Returns user dict if valid, None if not.
     Also updates last_login timestamp on success.
     """
-    with _get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM tg_users WHERE username = ?", (username.strip(),)
-        ).fetchone()
+    conn = get_conn()
+    try:
+        with conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT * FROM tg_users WHERE username = %s", (username.strip(),))
+            row = cur.fetchone()
 
-        if not row:
-            return None
+            if not row:
+                return None
 
-        expected = _hash_password(password, row["salt"])
-        if not secrets.compare_digest(expected, row["password_hash"]):
-            return None
+            expected = _hash_password(password, row["salt"])
+            if not secrets.compare_digest(expected, row["password_hash"]):
+                return None
 
-        # Update last login time
-        conn.execute(
-            "UPDATE tg_users SET last_login = ? WHERE username = ?",
-            (datetime.utcnow().isoformat(), username),
-        )
-        conn.commit()
-
-        return {"username": row["username"], "role": row["role"]}
+            cur.execute(
+                "UPDATE tg_users SET last_login = %s WHERE username = %s",
+                (datetime.utcnow().isoformat(), username),
+            )
+            return {"username": row["username"], "role": row["role"]}
+    finally:
+        conn.close()
 
 
 def create_user(username: str, password: str, role: str) -> bool:
@@ -136,60 +133,76 @@ def create_user(username: str, password: str, role: str) -> bool:
     if role not in ROLE_PERMISSIONS:
         raise ValueError(f"Invalid role: {role}. Must be one of {list(ROLE_PERMISSIONS)}")
 
-    salt = secrets.token_hex(16)
+    salt    = secrets.token_hex(16)
     pw_hash = _hash_password(password, salt)
 
+    conn = get_conn()
     try:
-        with _get_conn() as conn:
-            conn.execute(
+        with conn:
+            cur = conn.cursor()
+            cur.execute(
                 "INSERT INTO tg_users (username, password_hash, salt, role, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "VALUES (%s, %s, %s, %s, %s)",
                 (username.strip(), pw_hash, salt, role, datetime.utcnow().isoformat()),
             )
-            conn.commit()
         return True
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError:
+        conn.rollback()
         return False  # Username already exists
+    finally:
+        conn.close()
 
 
 def change_password(username: str, new_password: str) -> None:
     """Update password for an existing user."""
-    salt = secrets.token_hex(16)
+    salt    = secrets.token_hex(16)
     pw_hash = _hash_password(new_password, salt)
-    with _get_conn() as conn:
-        conn.execute(
-            "UPDATE tg_users SET password_hash = ?, salt = ? WHERE username = ?",
-            (pw_hash, salt, username),
-        )
-        conn.commit()
+    conn = get_conn()
+    try:
+        with conn:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE tg_users SET password_hash = %s, salt = %s WHERE username = %s",
+                (pw_hash, salt, username),
+            )
+    finally:
+        conn.close()
 
 
 def delete_user(username: str) -> bool:
     """Remove a user. Cannot delete the last admin."""
-    with _get_conn() as conn:
-        # Prevent deleting the last admin account — would lock everyone out
-        admin_count = conn.execute(
-            "SELECT COUNT(*) FROM tg_users WHERE role = 'Admin'"
-        ).fetchone()[0]
-        target_role = conn.execute(
-            "SELECT role FROM tg_users WHERE username = ?", (username,)
-        ).fetchone()
+    conn = get_conn()
+    try:
+        with conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-        if target_role and target_role["role"] == "Admin" and admin_count <= 1:
-            return False  # Can't delete the last admin
+            cur.execute("SELECT COUNT(*) FROM tg_users WHERE role = 'Admin'")
+            admin_count = cur.fetchone()["count"]
 
-        conn.execute("DELETE FROM tg_users WHERE username = ?", (username,))
-        conn.commit()
-        return True
+            cur.execute("SELECT role FROM tg_users WHERE username = %s", (username,))
+            target = cur.fetchone()
+
+            if target and target["role"] == "Admin" and admin_count <= 1:
+                return False  # Can't delete the last admin
+
+            cur.execute("DELETE FROM tg_users WHERE username = %s", (username,))
+            return True
+    finally:
+        conn.close()
 
 
 def get_all_users() -> list[dict]:
     """Return all users (without password hashes). Admin-only use."""
-    with _get_conn() as conn:
-        rows = conn.execute(
-            "SELECT username, role, created_at, last_login FROM tg_users ORDER BY username"
-        ).fetchall()
-        return [dict(r) for r in rows]
+    conn = get_conn()
+    try:
+        with conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT username, role, created_at, last_login FROM tg_users ORDER BY username"
+            )
+            return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
 
 
 def can_do(action: str) -> bool:

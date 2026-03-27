@@ -1,37 +1,35 @@
 """
 outcome_db.py
 =============
-SQLite logging for ThrottleGuard predictions.
+Prediction logging for ThrottleGuard — Supabase PostgreSQL backend.
 
-Every prediction is written to predictions.db.
-Fleet technicians fill in `actual_failure_occurred` and
-`actual_outcome_date` after service — this becomes ground truth
-for validating and improving the expert system over time.
+Every prediction is written to tg_predictions.
+Fleet technicians fill in actual_failure_occurred and actual_outcome_date
+after service — this becomes ground truth for validating the expert system.
 
 Schema
 ------
-predictions
-    id                      INTEGER PRIMARY KEY
+tg_predictions
+    id                      SERIAL PRIMARY KEY
     vehicle_id              TEXT
     prediction_date         TEXT        (YYYY-MM-DD)
     predicted_priority      TEXT        (CRITICAL/HIGH/MEDIUM/LOW)
     predicted_failure_mode  TEXT        (CLOGGING/THERMAL_SHOCK/etc.)
     risk_score              INTEGER
-    actual_outcome_date     TEXT        NULL — filled in by fleet
-    actual_failure_occurred INTEGER     NULL — 1/0, filled in by fleet
+    actual_outcome_date     TEXT        NULL — filled in after service
+    actual_failure_occurred INTEGER     NULL — 1=failure confirmed, 0=false alarm
     notes                   TEXT        NULL — technician notes
     created_at              TEXT
 """
 
-import sqlite3
-import pathlib
+import psycopg2.extras
 from datetime import date, datetime
 
-DB_PATH = pathlib.Path(__file__).parent / "predictions.db"
+from tg_db import get_conn
 
 CREATE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS predictions (
-    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS tg_predictions (
+    id                      SERIAL PRIMARY KEY,
     vehicle_id              TEXT    NOT NULL,
     prediction_date         TEXT    NOT NULL,
     predicted_priority      TEXT    NOT NULL,
@@ -44,19 +42,16 @@ CREATE TABLE IF NOT EXISTS predictions (
 );
 """
 
-INSERT_SQL = """
-INSERT INTO predictions
-    (vehicle_id, prediction_date, predicted_priority,
-     predicted_failure_mode, risk_score, created_at)
-VALUES (?, ?, ?, ?, ?, ?);
-"""
-
 
 def init_db() -> None:
-    """Create the predictions table if it doesn't exist."""
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(CREATE_TABLE_SQL)
-        conn.commit()
+    """Create the tg_predictions table if it doesn't exist."""
+    conn = get_conn()
+    try:
+        with conn:
+            cur = conn.cursor()
+            cur.execute(CREATE_TABLE_SQL)
+    finally:
+        conn.close()
 
 
 def log_prediction(
@@ -66,23 +61,33 @@ def log_prediction(
     risk_score: int,
 ) -> int:
     """
-    Insert a new prediction row.  Returns the row id.
+    Insert a new prediction row. Returns the row id.
 
     actual_outcome_date and actual_failure_occurred are left NULL —
-    they are filled in by fleet staff after the vehicle is serviced.
+    filled in by fleet staff after the vehicle is serviced.
     """
     init_db()
-    now = datetime.utcnow().isoformat()
+    now   = datetime.utcnow().isoformat()
     today = date.today().isoformat()
 
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute(
-            INSERT_SQL,
-            (vehicle_id, today, predicted_priority,
-             predicted_failure_mode, int(risk_score), now),
-        )
-        conn.commit()
-        return cur.lastrowid
+    conn = get_conn()
+    try:
+        with conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO tg_predictions
+                    (vehicle_id, prediction_date, predicted_priority,
+                     predicted_failure_mode, risk_score, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (vehicle_id, today, predicted_priority,
+                 predicted_failure_mode, int(risk_score), now),
+            )
+            return cur.fetchone()[0]
+    finally:
+        conn.close()
 
 
 def record_outcome(
@@ -99,7 +104,7 @@ def record_outcome(
     ----------
     vehicle_id              : unit identifier
     prediction_date         : YYYY-MM-DD of the original prediction
-    actual_failure_occurred : True if a DPF failure/service actually happened
+    actual_failure_occurred : True if a DPF/SCR failure actually happened
     actual_outcome_date     : YYYY-MM-DD when failure/service occurred
     notes                   : technician free-text
 
@@ -108,30 +113,34 @@ def record_outcome(
     init_db()
     outcome_date = actual_outcome_date or date.today().isoformat()
 
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute(
-            """
-            UPDATE predictions
-            SET actual_failure_occurred = ?,
-                actual_outcome_date     = ?,
-                notes                   = ?
-            WHERE vehicle_id      = ?
-              AND prediction_date = ?
-              AND id = (
-                  SELECT MAX(id) FROM predictions
-                  WHERE vehicle_id = ? AND prediction_date = ?
-              )
-            """,
-            (
-                1 if actual_failure_occurred else 0,
-                outcome_date,
-                notes,
-                vehicle_id, prediction_date,
-                vehicle_id, prediction_date,
-            ),
-        )
-        conn.commit()
-        return cur.rowcount
+    conn = get_conn()
+    try:
+        with conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE tg_predictions
+                SET actual_failure_occurred = %s,
+                    actual_outcome_date     = %s,
+                    notes                   = %s
+                WHERE vehicle_id      = %s
+                  AND prediction_date = %s
+                  AND id = (
+                      SELECT MAX(id) FROM tg_predictions
+                      WHERE vehicle_id = %s AND prediction_date = %s
+                  )
+                """,
+                (
+                    1 if actual_failure_occurred else 0,
+                    outcome_date,
+                    notes,
+                    vehicle_id, prediction_date,
+                    vehicle_id, prediction_date,
+                ),
+            )
+            return cur.rowcount
+    finally:
+        conn.close()
 
 
 def get_predictions(
@@ -149,52 +158,60 @@ def get_predictions(
     unvalidated_only : only return rows where actual_failure_occurred is NULL
     """
     init_db()
-    clauses = []
-    params: list = []
+    clauses: list[str] = []
+    params:  list      = []
 
     if vehicle_id:
-        clauses.append("vehicle_id = ?")
+        clauses.append("vehicle_id = %s")
         params.append(vehicle_id)
     if priority:
-        clauses.append("predicted_priority = ?")
+        clauses.append("predicted_priority = %s")
         params.append(priority)
     if unvalidated_only:
         clauses.append("actual_failure_occurred IS NULL")
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-    sql = f"SELECT * FROM predictions {where} ORDER BY id DESC"
+    sql   = f"SELECT * FROM tg_predictions {where} ORDER BY id DESC"
 
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(sql, params).fetchall()
-        return [dict(r) for r in rows]
+    conn = get_conn()
+    try:
+        with conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(sql, params)
+            return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
 
 
-def get_validation_summary() -> dict:
+def get_validation_summary() -> list[dict]:
     """
     Return a simple accuracy summary for validated predictions.
     Useful for checking expert-system performance over time.
     """
     init_db()
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """
-            SELECT predicted_priority,
-                   COUNT(*)                                        AS total,
-                   SUM(CASE WHEN actual_failure_occurred = 1
-                            THEN 1 ELSE 0 END)                    AS true_positives,
-                   SUM(CASE WHEN actual_failure_occurred = 0
-                            THEN 1 ELSE 0 END)                    AS false_positives,
-                   SUM(CASE WHEN actual_failure_occurred IS NULL
-                            THEN 1 ELSE 0 END)                    AS pending
-            FROM predictions
-            GROUP BY predicted_priority
-            ORDER BY CASE predicted_priority
-                WHEN 'CRITICAL' THEN 0
-                WHEN 'HIGH'     THEN 1
-                WHEN 'MEDIUM'   THEN 2
-                ELSE 3 END
-            """
-        ).fetchall()
-        return [dict(r) for r in rows]
+    conn = get_conn()
+    try:
+        with conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """
+                SELECT predicted_priority,
+                       COUNT(*)                                          AS total,
+                       SUM(CASE WHEN actual_failure_occurred = 1
+                                THEN 1 ELSE 0 END)                      AS true_positives,
+                       SUM(CASE WHEN actual_failure_occurred = 0
+                                THEN 1 ELSE 0 END)                      AS false_positives,
+                       SUM(CASE WHEN actual_failure_occurred IS NULL
+                                THEN 1 ELSE 0 END)                      AS pending
+                FROM tg_predictions
+                GROUP BY predicted_priority
+                ORDER BY CASE predicted_priority
+                    WHEN 'CRITICAL' THEN 0
+                    WHEN 'HIGH'     THEN 1
+                    WHEN 'MEDIUM'   THEN 2
+                    ELSE 3 END
+                """
+            )
+            return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
