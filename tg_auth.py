@@ -23,7 +23,7 @@ import secrets
 import psycopg2
 import psycopg2.extras
 import psycopg2.errorcodes
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import streamlit as st
 
@@ -66,9 +66,51 @@ if DEFAULT_ADMIN_PASSWORD == "ChangeMe_OnFirstLogin!":
     )
 
 
+# ── Rate limiting ─────────────────────────────────────────────────────────────
+# In-memory store — resets on dyno restart, which is acceptable for a
+# single-instance Railway deployment. Keeps login brute-force in check.
+
+_failed_attempts: dict[str, list] = {}  # username -> list of failure datetimes
+_MAX_ATTEMPTS    = 5
+_LOCKOUT_SECONDS = 900  # 15 minutes
+
+
+def _is_locked_out(username: str) -> bool:
+    cutoff = datetime.utcnow() - timedelta(seconds=_LOCKOUT_SECONDS)
+    recent = [t for t in _failed_attempts.get(username, []) if t > cutoff]
+    _failed_attempts[username] = recent
+    return len(recent) >= _MAX_ATTEMPTS
+
+
+def _record_failure(username: str) -> None:
+    _failed_attempts.setdefault(username, []).append(datetime.utcnow())
+
+
+def _clear_failures(username: str) -> None:
+    _failed_attempts.pop(username, None)
+
+
+# ── Password hashing ──────────────────────────────────────────────────────────
+
 def _hash_password(password: str, salt: str) -> str:
-    """SHA-256 hash with per-user salt. Simple and dependency-free."""
-    return hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
+    """PBKDF2-SHA256 with 260,000 iterations — NIST-recommended for password storage."""
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 260_000)
+    return f"pbkdf2:{dk.hex()}"
+
+
+def _verify_password(password: str, salt: str, stored_hash: str) -> bool:
+    """
+    Verify a password against its stored hash.
+    Supports both PBKDF2 (new) and legacy SHA-256 (old) hashes so existing
+    users aren't locked out. SHA-256 hashes are upgraded to PBKDF2 on login.
+    """
+    if stored_hash.startswith("pbkdf2:"):
+        expected = _hash_password(password, salt)
+        return secrets.compare_digest(expected, stored_hash)
+    else:
+        # Legacy SHA-256 hash — compare and signal upgrade needed
+        legacy = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
+        return secrets.compare_digest(legacy, stored_hash)
 
 
 def init_auth_db() -> None:
@@ -100,21 +142,37 @@ def init_auth_db() -> None:
 def verify_login(username: str, password: str) -> dict | None:
     """
     Check credentials. Returns user dict if valid, None if not.
-    Also updates last_login timestamp on success.
+    Enforces rate limiting and upgrades legacy SHA-256 hashes to PBKDF2 on success.
     """
+    username = username.strip()
+
+    if _is_locked_out(username):
+        return None  # Silently deny — same response as wrong password
+
     conn = get_conn()
     try:
         with conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT * FROM tg_users WHERE username = %s", (username.strip(),))
+            cur.execute("SELECT * FROM tg_users WHERE username = %s", (username,))
             row = cur.fetchone()
 
             if not row:
+                _record_failure(username)
                 return None
 
-            expected = _hash_password(password, row["salt"])
-            if not secrets.compare_digest(expected, row["password_hash"]):
+            if not _verify_password(password, row["salt"], row["password_hash"]):
+                _record_failure(username)
                 return None
+
+            _clear_failures(username)
+
+            # Transparently upgrade legacy SHA-256 hash to PBKDF2 on successful login
+            if not row["password_hash"].startswith("pbkdf2:"):
+                new_hash = _hash_password(password, row["salt"])
+                cur.execute(
+                    "UPDATE tg_users SET password_hash = %s WHERE username = %s",
+                    (new_hash, username),
+                )
 
             cur.execute(
                 "UPDATE tg_users SET last_login = %s WHERE username = %s",
@@ -224,8 +282,10 @@ def login_page() -> None:
         layout="centered",
     )
 
-    # Two-column layout: value props on the left, login form on the right
-    col_left, col_right = st.columns([1.2, 1])
+    # Push content to vertical center
+    st.markdown("<div style='height: 8vh'></div>", unsafe_allow_html=True)
+
+    col_left, spacer, col_right = st.columns([1.2, 0.2, 1])
 
     with col_left:
         from tg_logo import render_logo
@@ -262,36 +322,82 @@ def login_page() -> None:
         )
 
     with col_right:
-        st.markdown(
-            """
-            <div style="text-align:center; padding: 2rem 0 0.5rem;">
-                <p style="color:#aaa; font-size:0.9rem;">Sign in to your fleet dashboard</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        tab_signin, tab_create, tab_reset = st.tabs(["Sign In", "Create Account", "Reset Password"])
 
-        with st.form("login_form"):
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Sign In", type="primary", use_container_width=True)
+        with tab_signin:
+            with st.form("login_form"):
+                username = st.text_input("Username")
+                password = st.text_input("Password", type="password")
+                submitted = st.form_submit_button("Sign In", type="primary", use_container_width=True)
 
-        if submitted:
-            if not username or not password:
-                st.error("Enter your username and password.")
-            else:
-                user = verify_login(username, password)
-                if user:
-                    st.session_state["tg_user"] = user
-                    st.rerun()
+            if submitted:
+                if not username or not password:
+                    st.error("Enter your username and password.")
                 else:
-                    st.error("Invalid username or password.")
+                    user = verify_login(username, password)
+                    if user:
+                        st.session_state["tg_user"] = user
+                        st.rerun()
+                    else:
+                        st.error("Invalid username or password.")
+
+        with tab_create:
+            with st.form("create_account_form"):
+                new_username = st.text_input("Username")
+                new_password = st.text_input("Password", type="password")
+                confirm_pw   = st.text_input("Confirm Password", type="password")
+                # Self-registered accounts start as Viewer; Admin can promote them
+                st.caption("New accounts are created as **Viewer**. Contact your Admin to request Technician access.")
+                create_submitted = st.form_submit_button("Create Account", type="primary", use_container_width=True)
+
+            if create_submitted:
+                if not new_username or not new_password or not confirm_pw:
+                    st.error("All fields are required.")
+                elif new_password != confirm_pw:
+                    st.error("Passwords do not match.")
+                elif len(new_password) < 6:
+                    st.error("Password must be at least 6 characters.")
+                else:
+                    ok = create_user(new_username, new_password, "Viewer")
+                    if ok:
+                        user = verify_login(new_username, new_password)
+                        st.session_state["tg_user"] = user
+                        st.rerun()
+                    else:
+                        st.error(f"Username '{new_username}' is already taken.")
+
+        with tab_reset:
+            st.caption("Enter your current credentials and choose a new password.")
+            with st.form("reset_pw_form"):
+                reset_username  = st.text_input("Username")
+                current_pw      = st.text_input("Current Password", type="password")
+                new_pw          = st.text_input("New Password", type="password")
+                confirm_new_pw  = st.text_input("Confirm New Password", type="password")
+                reset_submitted = st.form_submit_button("Update Password", type="primary", use_container_width=True)
+
+            if reset_submitted:
+                if not all([reset_username, current_pw, new_pw, confirm_new_pw]):
+                    st.error("All fields are required.")
+                elif new_pw != confirm_new_pw:
+                    st.error("New passwords do not match.")
+                elif len(new_pw) < 6:
+                    st.error("Password must be at least 6 characters.")
+                else:
+                    # Verify current credentials before allowing change
+                    user = verify_login(reset_username, current_pw)
+                    if not user:
+                        st.error("Current username or password is incorrect.")
+                    else:
+                        change_password(reset_username, new_pw)
+                        st.success("Password updated. You can now sign in.")
 
         st.markdown(
             "<p style='text-align:center; color:#555; font-size:0.8rem; margin-top:2rem;'>"
             "AHC Developers · ThrottleGuard v2</p>",
             unsafe_allow_html=True,
         )
+
+    st.markdown("<div style='height: 8vh'></div>", unsafe_allow_html=True)
 
 
 # ── User management panel (Admin only) ───────────────────────────────────────

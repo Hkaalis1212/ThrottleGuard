@@ -231,11 +231,17 @@ def score_row(row, previous_score=None):
         rule_labels.append(RULE_LABELS["CLOGGING_BACKPRES"])
 
     # ── SCR / Aftertreatment rules ────────────────────────────────────────────
-    # NOx conversion = (1 - nox_downstream / nox_upstream) * 100
-    # Default 100 when not present — conservative (assume healthy if no sensor)
+    # NOx conversion is only valid when peak regen temp >= 800°F.
+    # Below that threshold the ECM suppresses DEF dosing and the sensors
+    # are not in their valid operating range — treat as no data.
+    _raw_nox = row.get('nox_conversion_pct')
+    nox_conv = (
+        float(_raw_nox)
+        if _raw_nox is not None and row['dpf_outlet_temp_peak_f'] >= 800
+        else 100  # assume healthy when sensor absent or temp too low
+    )
 
     # Rule 11: NOx conversion — CRITICAL breach (<50%) — EPA derate risk
-    nox_conv = row.get('nox_conversion_pct', 100)
     if nox_conv < NOX_CONVERSION_CRITICAL_PCT:
         score += 40
         failure_triggers.append("NOX_BREAKTHROUGH")

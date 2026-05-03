@@ -80,7 +80,7 @@ STEPS = [
             "- **Confidence** — how many rules agreed (HIGH = 3+ rules, MEDIUM = 2, LOW = 1)\n"
             "- **Trend** — is this truck getting worse, improving, or stable?\n"
             "- **Recommended action** — specific next step for your tech\n\n"
-            "Try expanding **TRK-001** — it has 3 rules fired."
+            "Try expanding **TRK-001** — it has 5 rules fired across DPF and SCR."
         ),
         "tip":     "detail",
     },

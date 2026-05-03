@@ -339,5 +339,46 @@ def print_threshold_summary():
     print("="*65 + "\n")
 
 
+# ─────────────────────────────────────────────────────────────────
+# PASSIVE REGEN TEMPERATURE THRESHOLDS (°F)
+# Field-validated April 2026 — diesel tech community field observations
+#
+# These are NORMAL OPERATION exhaust temps (no commanded regen in progress).
+# Entirely different range from active regen temps above — do not mix them.
+#
+# Passive regen occurs when exhaust temps from normal highway driving are
+# hot enough to oxidize soot without a commanded regen event. City/idle
+# trucks never reach these temps — soot accumulates silently.
+# ─────────────────────────────────────────────────────────────────
+
+# Floor of passive regen range — exhaust must exceed this during normal op
+PASSIVE_REGEN_FLOOR_F = {
+    'DETROIT':          600,   # DD13/DD15/DD16 — passive starts above 600°F
+    'VOLVO_MACK':       600,   # D13/MP8 — 600-700°F range without 7th injector active
+    'CUMMINS_PACCAR':   575,   # ISX15/X15 — passive begins at 575°F
+}
+
+# Upper end of passive range — above this, active regen territory begins
+PASSIVE_REGEN_EFFECTIVE_HIGH_F = {
+    'DETROIT':          700,
+    'VOLVO_MACK':       700,   # 7th injector off keeps temps in this band
+    'CUMMINS_PACCAR':   900,   # can sustain higher temps under heavy highway load
+}
+
+# Below this during highway operation = passive regen definitely not occurring
+# Soot is accumulating silently between forced regen events
+PASSIVE_REGEN_FAILURE_FLOOR_F = {
+    'DETROIT':          550,
+    'VOLVO_MACK':       550,
+    'CUMMINS_PACCAR':   550,
+}
+
+PASSIVE_REGEN_NOTES = {
+    'DETROIT':          'DD15 especially sensitive to DEF system health affecting regen temps',
+    'VOLVO_MACK':       '7th injector status changes behavior — passive range is 600-700°F without it',
+    'CUMMINS_PACCAR':   'Cummins initiates active regen aggressively when passive temps are marginal',
+}
+
+
 if __name__ == '__main__':
     print_threshold_summary()

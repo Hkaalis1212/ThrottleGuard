@@ -267,8 +267,15 @@ def calculate_expert_score(row: dict[str, Any]) -> dict[str, Any]:
     regen_active = bool(row.get("regen_active", 1))
 
     # SCR / aftertreatment fields
-    # nox_conversion_pct: default 100 (assume healthy when sensor not present)
-    nox_conv     = float(row.get("nox_conversion_pct", 100))
+    # NOx conversion is only valid when peak regen temp >= 800°F.
+    # Below that threshold the ECM suppresses DEF dosing and the sensors
+    # are not in their valid operating range — treat as no data.
+    _raw_nox_conv = row.get("nox_conversion_pct")
+    nox_conv = (
+        float(_raw_nox_conv)
+        if _raw_nox_conv is not None and peak_temp >= 800
+        else 100  # assume healthy when sensor absent or temp too low
+    )
     scr_inlet    = row.get("scr_inlet_temp_f")
     def_conc     = row.get("def_concentration_pct")
     nh3_slip     = bool(row.get("nh3_slip_detected", False))

@@ -183,6 +183,32 @@ def get_predictions(
         conn.close()
 
 
+def get_calibration_data() -> list[dict]:
+    """
+    Return all validated predictions with risk_score and actual_failure_occurred.
+    Used to plot score distributions and evaluate whether thresholds are well-calibrated.
+    Only returns rows where actual_failure_occurred is NOT NULL.
+    """
+    init_db()
+    conn = get_conn()
+    try:
+        with conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """
+                SELECT risk_score,
+                       predicted_priority,
+                       actual_failure_occurred
+                FROM tg_predictions
+                WHERE actual_failure_occurred IS NOT NULL
+                ORDER BY risk_score
+                """
+            )
+            return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
 def get_validation_summary() -> list[dict]:
     """
     Return a simple accuracy summary for validated predictions.
