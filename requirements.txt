@@ -1,13 +1,6 @@
 streamlit
 pandas
 plotly
-fastapi
-uvicorn
-pydantic
-scikit-learn
-numpy
-joblib
-python-multipart
 python-dotenv
 psycopg2-binary
 stripe
