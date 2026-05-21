@@ -62,9 +62,9 @@ if not is_active(_fleet_id):
         st.markdown("## Start Your Free Trial")
         st.markdown(
             f"Get **{PRICING['trial_days']} days free** — full access, no credit card required.\n\n"
-            f"After your trial: **${PRICING['monthly']:.2f}/month**, "
-            f"**${PRICING['quarterly']:.2f}/quarter** (10% off), or "
-            f"**${PRICING['bi_annual']:.2f}/6 months** (15% off)."
+            f"After your trial: **${PRICING['starter']:.2f}/mo** (1–25 trucks), "
+            f"**${PRICING['growth']:.2f}/mo** (26–100 trucks), or "
+            f"**${PRICING['fleet']:.2f}/mo** (101–500 trucks)."
         )
         if st.button("Start Free Trial", type="primary", use_container_width=True):
             result = start_trial(_fleet_id)
@@ -77,38 +77,46 @@ if not is_active(_fleet_id):
         st.markdown("## Your Trial Has Ended")
         st.markdown("Choose a plan to continue accessing ThrottleGuard.")
 
-        col_m, col_q, col_b = st.columns(3)
-        with col_m:
+        col_s, col_g, col_f = st.columns(3)
+        with col_s:
             st.markdown(
-                f"### Monthly\n"
-                f"**${PRICING['monthly']:.2f}** / month\n\n"
-                "Billed monthly. Cancel anytime."
+                f"### Starter\n"
+                f"**1–25 trucks**\n\n"
+                f"**${PRICING['starter']:.2f}** / month\n\n"
+                "Cancel anytime."
             )
-            if st.button("Subscribe Monthly", use_container_width=True):
-                st.session_state["tg_plan_selected"] = "monthly"
+            if st.button("Subscribe — Starter", use_container_width=True):
+                st.session_state["tg_plan_selected"] = "starter"
 
-        with col_q:
+        with col_g:
             st.markdown(
-                f"### Quarterly 🏷️ 10% off\n"
-                f"**${PRICING['quarterly']:.2f}** / quarter\n\n"
-                f"${PRICING['quarterly']/3:.2f}/mo equiv. Save ${PRICING['monthly']*3 - PRICING['quarterly']:.2f}."
+                f"### Growth\n"
+                f"**26–100 trucks**\n\n"
+                f"**${PRICING['growth']:.2f}** / month\n\n"
+                "Cancel anytime."
             )
-            if st.button("Subscribe Quarterly", type="primary", use_container_width=True):
-                st.session_state["tg_plan_selected"] = "quarterly"
+            if st.button("Subscribe — Growth", type="primary", use_container_width=True):
+                st.session_state["tg_plan_selected"] = "growth"
 
-        with col_b:
+        with col_f:
             st.markdown(
-                f"### Bi-Annual 🏷️ 15% off\n"
-                f"**${PRICING['bi_annual']:.2f}** / 6 months\n\n"
-                f"${PRICING['bi_annual']/6:.2f}/mo equiv. Save ${PRICING['monthly']*6 - PRICING['bi_annual']:.2f}."
+                f"### Fleet\n"
+                f"**101–500 trucks**\n\n"
+                f"**${PRICING['fleet']:.2f}** / month\n\n"
+                "Cancel anytime."
             )
-            if st.button("Subscribe Bi-Annual", type="primary", use_container_width=True):
-                st.session_state["tg_plan_selected"] = "bi_annual"
+            if st.button("Subscribe — Fleet", type="primary", use_container_width=True):
+                st.session_state["tg_plan_selected"] = "fleet"
 
         plan = st.session_state.get("tg_plan_selected")
+        plan_labels = {
+            "starter": "Starter (1–25 trucks)",
+            "growth":  "Growth (26–100 trucks)",
+            "fleet":   "Fleet (101–500 trucks)",
+        }
         if plan:
             st.markdown("---")
-            st.markdown(f"**{plan.capitalize()} plan — ${PRICING[plan]:.2f}**")
+            st.markdown(f"**{plan_labels.get(plan, plan)} — ${PRICING[plan]:.2f}/mo**")
             intent_result = create_payment_intent(_fleet_id, plan)
             if not intent_result["success"]:
                 st.error(intent_result["error"])
@@ -602,30 +610,28 @@ def _render_subscription_tab():
 
     if not sub or sub["status"] != "active" or sub["plan_type"] == "trial":
         render_section_header("Upgrade Plan", "")
-        col_m, col_q, col_b = st.columns(3)
-        with col_m:
-            st.markdown(f"**Monthly** — ${PRICING['monthly']:.2f}/mo\n\nCancel anytime.")
-            if st.button("Subscribe Monthly", use_container_width=True, key="sub_monthly"):
-                st.session_state["tg_plan_selected"] = "monthly"
-        with col_q:
-            st.markdown(
-                f"**Quarterly** 🏷️ 10% off — ${PRICING['quarterly']:.2f}/quarter\n\n"
-                f"${PRICING['quarterly']/3:.2f}/mo equiv."
-            )
-            if st.button("Subscribe Quarterly", type="primary", use_container_width=True, key="sub_quarterly"):
-                st.session_state["tg_plan_selected"] = "quarterly"
-        with col_b:
-            st.markdown(
-                f"**Bi-Annual** 🏷️ 15% off — ${PRICING['bi_annual']:.2f}/6 months\n\n"
-                f"${PRICING['bi_annual']/6:.2f}/mo equiv."
-            )
-            if st.button("Subscribe Bi-Annual", type="primary", use_container_width=True, key="sub_bi_annual"):
-                st.session_state["tg_plan_selected"] = "bi_annual"
+        col_s, col_g, col_f = st.columns(3)
+        with col_s:
+            st.markdown(f"**Starter** — 1–25 trucks\n\n${PRICING['starter']:.2f}/mo · Cancel anytime.")
+            if st.button("Subscribe — Starter", use_container_width=True, key="sub_starter"):
+                st.session_state["tg_plan_selected"] = "starter"
+        with col_g:
+            st.markdown(f"**Growth** — 26–100 trucks\n\n${PRICING['growth']:.2f}/mo · Cancel anytime.")
+            if st.button("Subscribe — Growth", type="primary", use_container_width=True, key="sub_growth"):
+                st.session_state["tg_plan_selected"] = "growth"
+        with col_f:
+            st.markdown(f"**Fleet** — 101–500 trucks\n\n${PRICING['fleet']:.2f}/mo · Cancel anytime.")
+            if st.button("Subscribe — Fleet", type="primary", use_container_width=True, key="sub_fleet"):
+                st.session_state["tg_plan_selected"] = "fleet"
 
         plan = st.session_state.get("tg_plan_selected")
-        plan_labels = {"monthly": "Monthly", "quarterly": "Quarterly", "bi_annual": "Bi-Annual"}
+        plan_labels = {
+            "starter": "Starter (1–25 trucks)",
+            "growth":  "Growth (26–100 trucks)",
+            "fleet":   "Fleet (101–500 trucks)",
+        }
         if plan:
-            st.markdown(f"**{plan_labels.get(plan, plan)} — ${PRICING[plan]:.2f}**")
+            st.markdown(f"**{plan_labels.get(plan, plan)} — ${PRICING[plan]:.2f}/mo**")
             intent_result = create_payment_intent("admin", plan)
             if not intent_result["success"]:
                 st.error(intent_result["error"])

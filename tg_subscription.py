@@ -6,10 +6,10 @@ Each fleet has one subscription row tied to their admin account.
 
 Plans
 -----
-  trial     — 14 days free, full access
-  monthly   — $59.99 / month
-  quarterly — $161.97 / quarter  (10% off)
-  bi_annual — $305.95 / 6 months (15% off)
+  trial   — 14 days free, full access
+  starter — $59.99 / month  (1–25 trucks)
+  growth  — $149.00 / month (26–100 trucks)
+  fleet   — $399.00 / month (101–500 trucks)
 
 Tables (Supabase PostgreSQL)
 ----------------------------
@@ -39,23 +39,32 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 # ── Pricing ───────────────────────────────────────────────────────────────────
 
 PRICING = {
-    "monthly":    59.99,
-    "quarterly":  161.97,  # $59.99 * 3 * 0.90 — 10% off
-    "bi_annual":  305.95,  # $59.99 * 6 * 0.85 — 15% off
+    "starter":    59.99,   # 1–25 trucks
+    "growth":    149.00,   # 26–100 trucks
+    "fleet":     399.00,   # 101–500 trucks
     "trial_days": 14,
 }
 
-PLAN_DAYS = {
-    "monthly":   30,
-    "quarterly": 90,
-    "bi_annual": 180,
+# Fleet-size ranges for each tier — used for display and auto-selection
+PLAN_TRUCK_LIMITS = {
+    "starter": (1,   25),
+    "growth":  (26,  100),
+    "fleet":   (101, 500),
 }
 
-# Stripe Price IDs (live mode) — prod_UGko1NRAaPqguV
+PLAN_DAYS = {
+    "starter": 30,
+    "growth":  30,
+    "fleet":   30,
+}
+
+# Stripe Price IDs — create these in dashboard.stripe.com → Products
+# starter: price already exists at $59.99/mo (reused from previous monthly plan)
+# growth / fleet: create new prices and replace the TODO placeholders
 STRIPE_PRICE_IDS = {
-    "monthly":   "price_1TIDJvALl8vDltuMscHbk9a9",
-    "quarterly": "price_1TIDKDALl8vDltuMwsWIuQ08",
-    "bi_annual": "price_1TIDKUALl8vDltuMp8BnWMBs",
+    "starter": "price_1TIDJvALl8vDltuMscHbk9a9",  # $59.99/mo — existing
+    "growth":  "price_TODO_growth",                 # $149/mo  — create in Stripe
+    "fleet":   "price_TODO_fleet",                  # $399/mo  — create in Stripe
 }
 
 # ── Schema ────────────────────────────────────────────────────────────────────
@@ -64,7 +73,7 @@ CREATE_SUBSCRIPTIONS_SQL = """
 CREATE TABLE IF NOT EXISTS tg_subscriptions (
     id           SERIAL PRIMARY KEY,
     fleet_id     TEXT NOT NULL UNIQUE,   -- admin username = fleet identifier
-    plan_type    TEXT NOT NULL,          -- trial / monthly / quarterly / bi_annual
+    plan_type    TEXT NOT NULL,          -- trial / starter / growth / fleet
     status       TEXT NOT NULL DEFAULT 'active',  -- active / expired / cancelled
     start_date   TEXT NOT NULL,
     end_date     TEXT NOT NULL,
