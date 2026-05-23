@@ -136,7 +136,10 @@ if not is_active(_fleet_id):
 
     st.markdown("---")
     if st.button("Sign out"):
-        st.session_state.clear()
+        for _k in ["tg_user", "tg_plan_selected", "_active_df", "_active_optional",
+                   "_active_src", "_scored_key", "_scored_results", "demo_df",
+                   "tg_tour_active", "tg_tour_step", "scored_df"]:
+            st.session_state.pop(_k, None)
         st.rerun()
     st.stop()
 
@@ -197,17 +200,21 @@ def run_expert_system(df: pd.DataFrame) -> pd.DataFrame:
 
     result_df = pd.DataFrame(results)
 
-    # Single batch INSERT instead of one DB round-trip per truck.
-    # On a 100-truck fleet this cuts ~100 network calls to Supabase down to 1.
-    log_predictions_batch([
-        {
-            "vehicle_id":              str(r["vehicle_id"]),
-            "predicted_priority":      str(r["priority"]),
-            "predicted_failure_mode":  str(r["failure_mode"]),
-            "risk_score":              r["risk_score"] if r["risk_score"] is not None else -1,
-        }
-        for r in results
-    ])
+    try:
+        # Single batch INSERT instead of one DB round-trip per truck.
+        # On a 100-truck fleet this cuts ~100 network calls to Supabase down to 1.
+        # Wrapped in try/except so a DB outage never blocks scoring display.
+        log_predictions_batch([
+            {
+                "vehicle_id":              str(r["vehicle_id"]),
+                "predicted_priority":      str(r["priority"]),
+                "predicted_failure_mode":  str(r["failure_mode"]),
+                "risk_score":              r["risk_score"] if r["risk_score"] is not None else -1,
+            }
+            for r in results
+        ])
+    except Exception:
+        pass  # logging failure must not block the UI
 
     return result_df
 
@@ -380,68 +387,60 @@ def _render_detail_tab(results: pd.DataFrame):
     tutorial_callout("rules")
     render_section_header("Vehicle Detail", "Sorted by priority · Expand any vehicle for full diagnosis")
 
-    try:
-        col_filter, col_search = st.columns([1, 2])
-        with col_filter:
-            priority_filter = st.selectbox(
-                "Filter by priority",
-                ["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW"],
-                key="detail_priority_filter",
-            )
-        with col_search:
-            search_term = st.text_input(
-                "Search vehicle ID",
-                placeholder="e.g. T-247",
-                key="detail_search",
-            ).strip().upper()
+    col_filter, col_search = st.columns([1, 2])
+    with col_filter:
+        priority_filter = st.selectbox(
+            "Filter by priority",
+            ["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW"],
+            key="detail_priority_filter",
+        )
+    with col_search:
+        search_term = st.text_input(
+            "Search vehicle ID",
+            placeholder="e.g. T-247",
+            key="detail_search",
+        ).strip().upper()
 
-        sorted_results = results.sort_values(
-            "priority", key=lambda s: s.map(PRIORITY_ORDER)
-        ).reset_index(drop=True)
+    sorted_results = results.sort_values(
+        "priority", key=lambda s: s.map(PRIORITY_ORDER)
+    ).reset_index(drop=True)
 
-        if priority_filter != "ALL":
-            sorted_results = sorted_results[sorted_results["priority"] == priority_filter]
+    if priority_filter != "ALL":
+        sorted_results = sorted_results[sorted_results["priority"] == priority_filter]
 
-        if search_term:
-            sorted_results = sorted_results[
-                sorted_results["vehicle_id"].astype(str).str.upper().str.contains(search_term, na=False)
-            ]
+    if search_term:
+        sorted_results = sorted_results[
+            sorted_results["vehicle_id"].astype(str).str.upper().str.contains(search_term, na=False)
+        ]
 
-        if sorted_results.empty:
-            st.info("No vehicles match the current filter.")
-            return
+    if sorted_results.empty:
+        st.info("No vehicles match the current filter.")
+        return
 
-        st.caption(f"Showing {len(sorted_results)} of {len(results)} vehicles")
+    st.caption(f"Showing {len(sorted_results)} of {len(results)} vehicles")
 
-        for _, row in sorted_results.iterrows():
-            render_vehicle_expander(row)
-
-    except Exception as exc:
-        st.error(f"Vehicle Detail error: {exc}")
-        st.exception(exc)
+    for _, row in sorted_results.iterrows():
+        render_vehicle_expander(row)
 
 
 def _render_data_tab(results: pd.DataFrame):
     render_section_header("Full Assessment Results", "All vehicles · sortable · downloadable")
 
-    try:
-        display_cols = [c for c in ["vehicle_id", "risk_score", "priority", "failure_mode", "reasons", "action"] if c in results.columns]
-        st.dataframe(
-            results[display_cols].sort_values("risk_score", ascending=False),
-            use_container_width=True,
-            hide_index=True,
-        )
+    display_cols = [c for c in ["vehicle_id", "risk_score", "priority", "failure_mode", "reasons", "action"] if c in results.columns]
+    st.dataframe(
+        results[display_cols].sort_values("risk_score", ascending=False, na_position="last"),
+        use_container_width=True,
+        hide_index=True,
+    )
 
-        csv_out = results.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="⬇ Download Results CSV",
-            data=csv_out,
-            file_name=f"throttleguard_assessment_{date.today()}.csv",
-            mime="text/csv",
-        )
-    except Exception as exc:
-        st.error(f"Raw Data error: {exc}")
-        st.exception(exc)
+    csv_out = results.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="⬇ Download Results CSV",
+        data=csv_out,
+        file_name=f"throttleguard_assessment_{date.today()}.csv",
+        mime="text/csv",
+        key="download_results_csv",
+    )
 
 
 def _render_fleet_scores_tab():
@@ -953,7 +952,12 @@ def main():
     with col_signout:
         st.markdown("<div style='padding-top:0.5rem;'></div>", unsafe_allow_html=True)
         if st.button("Sign Out", use_container_width=True):
-            st.session_state.clear()
+            for _k in [
+                "tg_user", "_active_df", "_active_optional", "_active_src",
+                "_scored_key", "_scored_results", "demo_df", "tg_plan_selected",
+                "tg_tour_active", "tg_tour_step", "scored_df",
+            ]:
+                st.session_state.pop(_k, None)
             st.rerun()
 
     # ── Sidebar ───────────────────────────────────────────────────────────────
@@ -1026,22 +1030,38 @@ def main():
 
     # ── Fleet Scores (no data required) ──────────────────────────────────────
     with tab_map["Fleet Scores"]:
-        _render_fleet_scores_tab()
+        try:
+            _render_fleet_scores_tab()
+        except Exception as _e:
+            st.error(f"Fleet Scores error: {_e}")
+            st.exception(_e)
 
     # ── Outcomes (no data required) ───────────────────────────────────────────
     if "Outcomes" in tab_map:
         with tab_map["Outcomes"]:
-            _render_outcomes_tab()
+            try:
+                _render_outcomes_tab()
+            except Exception as _e:
+                st.error(f"Outcomes error: {_e}")
+                st.exception(_e)
 
     # ── User Management ───────────────────────────────────────────────────────
     if "User Management" in tab_map:
         with tab_map["User Management"]:
-            user_management_panel()
+            try:
+                user_management_panel()
+            except Exception as _e:
+                st.error(f"User Management error: {_e}")
+                st.exception(_e)
 
     # ── Subscription ──────────────────────────────────────────────────────────
     if "Subscription" in tab_map:
         with tab_map["Subscription"]:
-            _render_subscription_tab()
+            try:
+                _render_subscription_tab()
+            except Exception as _e:
+                st.error(f"Subscription error: {_e}")
+                st.exception(_e)
 
     # ── Dashboard tab — data-dependent ───────────────────────────────────────
     with tab_map["Dashboard"]:
