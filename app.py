@@ -455,28 +455,16 @@ def _render_detail_tab(results: pd.DataFrame):
 
 
 def _render_data_tab(results: pd.DataFrame):
-    render_section_header("Full Assessment Results", "All vehicles · sortable · downloadable")
-
-    display_cols = [c for c in ["vehicle_id", "risk_score", "priority", "failure_mode", "reasons", "action"] if c in results.columns]
-
-    if not display_cols:
-        st.warning(f"Unexpected result columns: {list(results.columns)}")
-        st.dataframe(results, use_container_width=True, hide_index=True)
-    else:
-        sort_col = "risk_score" if "risk_score" in display_cols else display_cols[0]
-        try:
-            display_df = results[display_cols].sort_values(sort_col, ascending=False, na_position="last")
-        except Exception:
-            display_df = results[display_cols]
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
-
+    st.subheader("Full Assessment Results")
+    st.caption(f"{len(results)} vehicles scored · columns: {list(results.columns)}")
+    st.dataframe(results, use_container_width=True, hide_index=True)
     csv_out = results.to_csv(index=False).encode("utf-8")
     st.download_button(
-        label="⬇ Download Results CSV",
-        data=csv_out,
-        file_name=f"throttleguard_assessment_{date.today()}.csv",
-        mime="text/csv",
-        key="download_results_csv",
+        "⬇ Download Results CSV",
+        csv_out,
+        f"throttleguard_{date.today()}.csv",
+        "text/csv",
+        key="dl_results",
     )
 
 
