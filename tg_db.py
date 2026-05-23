@@ -34,4 +34,4 @@ def get_conn() -> psycopg2.extensions.connection:
             "Add it to your .env file (local) or Railway Variables (production). "
             "Format: postgresql://user:password@host:5432/dbname"
         )
-    return psycopg2.connect(url)
+    return psycopg2.connect(url, connect_timeout=8)

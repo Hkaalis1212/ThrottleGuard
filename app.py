@@ -39,7 +39,11 @@ from tg_styles import (
 )
 
 # ── Auth gate ─────────────────────────────────────────────────────────────────
-init_auth_db()
+# Guard init_auth_db() so it only opens a DB connection once per session,
+# not on every Streamlit rerun (every tab click / widget interaction).
+if "_auth_db_ready" not in st.session_state:
+    init_auth_db()
+    st.session_state["_auth_db_ready"] = True
 
 if "tg_user" not in st.session_state or not st.session_state["tg_user"]:
     login_page()
@@ -48,7 +52,12 @@ if "tg_user" not in st.session_state or not st.session_state["tg_user"]:
 # ── Subscription gate ─────────────────────────────────────────────────────────
 _fleet_id = "admin"
 
-if not is_active(_fleet_id):
+# Cache the subscription active-check per session so we don't open a new
+# DB connection on every rerun. Cleared on sign-out and after payment.
+if "_sub_active" not in st.session_state:
+    st.session_state["_sub_active"] = is_active(_fleet_id)
+
+if not st.session_state["_sub_active"]:
     _sub = get_subscription(_fleet_id)
 
     st.set_page_config(page_title="ThrottleGuard — Subscription", page_icon="🚛", layout="centered")
@@ -70,6 +79,7 @@ if not is_active(_fleet_id):
             result = start_trial(_fleet_id)
             if result["success"]:
                 st.success(f"Trial started — {PRICING['trial_days']} days of full access.")
+                st.session_state.pop("_sub_active", None)  # force re-check on next run
                 st.rerun()
             else:
                 st.error(result["error"])
@@ -130,6 +140,7 @@ if not is_active(_fleet_id):
                         result = confirm_payment(_fleet_id, plan, payment_intent_id.strip())
                         if result["success"]:
                             st.success(f"Subscribed! Access active until {result['end_date'].strftime('%B %d, %Y')}.")
+                            st.session_state.pop("_sub_active", None)
                             st.rerun()
                         else:
                             st.error(result["error"])
@@ -138,7 +149,8 @@ if not is_active(_fleet_id):
     if st.button("Sign out"):
         for _k in ["tg_user", "tg_plan_selected", "_active_df", "_active_optional",
                    "_active_src", "_scored_key", "_scored_results", "demo_df",
-                   "tg_tour_active", "tg_tour_step", "scored_df"]:
+                   "tg_tour_active", "tg_tour_step", "scored_df",
+                   "_sub_active", "_auth_db_ready"]:
             st.session_state.pop(_k, None)
         st.rerun()
     st.stop()
@@ -485,7 +497,11 @@ def _render_outcomes_tab():
         "Log service outcomes to build ground truth and validate expert system accuracy over time",
     )
 
-    pending = get_predictions(unvalidated_only=True)
+    # Cache pending predictions per session — DB query only on first load or after
+    # an outcome is recorded (the record_outcome handler clears this key).
+    if "_pending_predictions" not in st.session_state:
+        st.session_state["_pending_predictions"] = get_predictions(unvalidated_only=True)
+    pending = st.session_state["_pending_predictions"]
 
     render_section_header("Log Outcome", "")
 
@@ -544,6 +560,7 @@ def _render_outcomes_tab():
                 )
                 if updated:
                     st.success(f"Outcome saved for {row['vehicle_id']}.")
+                    st.session_state.pop("_pending_predictions", None)  # refresh on next run
                     st.rerun()
                 else:
                     st.error("Could not save — prediction record not found.")
@@ -981,6 +998,7 @@ def main():
                 "tg_user", "_active_df", "_active_optional", "_active_src",
                 "_scored_key", "_scored_results", "demo_df", "tg_plan_selected",
                 "tg_tour_active", "tg_tour_step", "scored_df",
+                "_sub_active", "_auth_db_ready", "_pending_predictions",
             ]:
                 st.session_state.pop(_k, None)
             st.rerun()
