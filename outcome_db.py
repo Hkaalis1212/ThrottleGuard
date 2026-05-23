@@ -90,6 +90,52 @@ def log_prediction(
         conn.close()
 
 
+def log_predictions_batch(rows: list[dict]) -> None:
+    """
+    Insert multiple prediction rows in a single round-trip.
+
+    Each dict in rows must have:
+        vehicle_id, predicted_priority, predicted_failure_mode, risk_score
+
+    Replaces calling log_prediction() in a loop, which opens a new connection
+    and runs CREATE TABLE IF NOT EXISTS for every single truck — very slow on
+    large fleets.
+    """
+    if not rows:
+        return
+    init_db()
+    now   = __import__("datetime").datetime.utcnow().isoformat()
+    today = __import__("datetime").date.today().isoformat()
+
+    params = [
+        (
+            r["vehicle_id"],
+            today,
+            r["predicted_priority"],
+            r["predicted_failure_mode"],
+            int(r["risk_score"]),
+            now,
+        )
+        for r in rows
+    ]
+
+    conn = get_conn()
+    try:
+        with conn:
+            cur = conn.cursor()
+            cur.executemany(
+                """
+                INSERT INTO tg_predictions
+                    (vehicle_id, prediction_date, predicted_priority,
+                     predicted_failure_mode, risk_score, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                params,
+            )
+    finally:
+        conn.close()
+
+
 def record_outcome(
     vehicle_id: str,
     prediction_date: str,

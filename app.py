@@ -20,7 +20,7 @@ import plotly.express as px
 from datetime import date
 
 from dpf_expert_system import calculate_expert_score, REQUIRED_FIELDS, OPTIONAL_FIELDS
-from outcome_db import log_prediction, init_db, get_predictions, record_outcome, get_validation_summary, get_calibration_data
+from outcome_db import log_prediction, log_predictions_batch, init_db, get_predictions, record_outcome, get_validation_summary, get_calibration_data
 from tg_auth import init_auth_db, login_page, can_do, user_management_panel
 from tg_tutorial import render_tutorial_sidebar, tutorial_callout
 from tg_subscription import (
@@ -188,21 +188,26 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 # ── Prediction engine ─────────────────────────────────────────────────────────
 
 def run_expert_system(df: pd.DataFrame) -> pd.DataFrame:
-    results = []
-    for _, row in df.iterrows():
-        row_dict = row.where(pd.notna(row), other=None).to_dict()
-        result = calculate_expert_score(row_dict)
-        results.append(result)
+    # Score every row. Using a list comprehension over iterrows() is faster
+    # than iterrows() alone, and avoids the overhead of df.apply() boxing.
+    results = [
+        calculate_expert_score(row.where(pd.notna(row), other=None).to_dict())
+        for _, row in df.iterrows()
+    ]
 
     result_df = pd.DataFrame(results)
 
-    for _, r in result_df.iterrows():
-        log_prediction(
-            vehicle_id=str(r["vehicle_id"]),
-            predicted_priority=str(r["priority"]),
-            predicted_failure_mode=str(r["failure_mode"]),
-            risk_score=r["risk_score"] if r["risk_score"] is not None else -1,
-        )
+    # Single batch INSERT instead of one DB round-trip per truck.
+    # On a 100-truck fleet this cuts ~100 network calls to Supabase down to 1.
+    log_predictions_batch([
+        {
+            "vehicle_id":              str(r["vehicle_id"]),
+            "predicted_priority":      str(r["priority"]),
+            "predicted_failure_mode":  str(r["failure_mode"]),
+            "risk_score":              r["risk_score"] if r["risk_score"] is not None else -1,
+        }
+        for r in results
+    ])
 
     return result_df
 
