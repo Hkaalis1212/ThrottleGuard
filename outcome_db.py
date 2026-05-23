@@ -104,8 +104,8 @@ def log_predictions_batch(rows: list[dict]) -> None:
     if not rows:
         return
     init_db()
-    now   = __import__("datetime").datetime.utcnow().isoformat()
-    today = __import__("datetime").date.today().isoformat()
+    now   = datetime.utcnow().isoformat()
+    today = date.today().isoformat()
 
     params = [
         (

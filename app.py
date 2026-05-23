@@ -380,31 +380,68 @@ def _render_detail_tab(results: pd.DataFrame):
     tutorial_callout("rules")
     render_section_header("Vehicle Detail", "Sorted by priority · Expand any vehicle for full diagnosis")
 
-    sorted_results = results.sort_values(
-        "priority", key=lambda s: s.map(PRIORITY_ORDER)
-    ).reset_index(drop=True)
+    try:
+        col_filter, col_search = st.columns([1, 2])
+        with col_filter:
+            priority_filter = st.selectbox(
+                "Filter by priority",
+                ["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW"],
+                key="detail_priority_filter",
+            )
+        with col_search:
+            search_term = st.text_input(
+                "Search vehicle ID",
+                placeholder="e.g. T-247",
+                key="detail_search",
+            ).strip().upper()
 
-    for _, row in sorted_results.iterrows():
-        render_vehicle_expander(row)
+        sorted_results = results.sort_values(
+            "priority", key=lambda s: s.map(PRIORITY_ORDER)
+        ).reset_index(drop=True)
+
+        if priority_filter != "ALL":
+            sorted_results = sorted_results[sorted_results["priority"] == priority_filter]
+
+        if search_term:
+            sorted_results = sorted_results[
+                sorted_results["vehicle_id"].astype(str).str.upper().str.contains(search_term, na=False)
+            ]
+
+        if sorted_results.empty:
+            st.info("No vehicles match the current filter.")
+            return
+
+        st.caption(f"Showing {len(sorted_results)} of {len(results)} vehicles")
+
+        for _, row in sorted_results.iterrows():
+            render_vehicle_expander(row)
+
+    except Exception as exc:
+        st.error(f"Vehicle Detail error: {exc}")
+        st.exception(exc)
 
 
 def _render_data_tab(results: pd.DataFrame):
     render_section_header("Full Assessment Results", "All vehicles · sortable · downloadable")
 
-    st.dataframe(
-        results[["vehicle_id", "risk_score", "priority", "failure_mode", "reasons", "action"]]
-        .sort_values("risk_score", ascending=False),
-        use_container_width=True,
-        hide_index=True,
-    )
+    try:
+        display_cols = [c for c in ["vehicle_id", "risk_score", "priority", "failure_mode", "reasons", "action"] if c in results.columns]
+        st.dataframe(
+            results[display_cols].sort_values("risk_score", ascending=False),
+            use_container_width=True,
+            hide_index=True,
+        )
 
-    csv_out = results.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="⬇ Download Results CSV",
-        data=csv_out,
-        file_name=f"throttleguard_assessment_{date.today()}.csv",
-        mime="text/csv",
-    )
+        csv_out = results.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="⬇ Download Results CSV",
+            data=csv_out,
+            file_name=f"throttleguard_assessment_{date.today()}.csv",
+            mime="text/csv",
+        )
+    except Exception as exc:
+        st.error(f"Raw Data error: {exc}")
+        st.exception(exc)
 
 
 def _render_fleet_scores_tab():
