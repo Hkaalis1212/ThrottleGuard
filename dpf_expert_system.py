@@ -103,11 +103,11 @@ FAILURE_MODE_PRIORITY = [
 
 def validate_inputs(row: dict[str, Any]) -> list[str]:
     """
-    Check that all required fields are present in the input dict.
+    Check that all required fields are present and non-null in the input dict.
 
-    Returns a list of missing field names (empty list = valid).
+    Returns a list of missing/blank field names (empty list = valid).
     """
-    return [f for f in REQUIRED_FIELDS if f not in row]
+    return [f for f in REQUIRED_FIELDS if f not in row or row[f] is None]
 
 
 # ── Action text ───────────────────────────────────────────────────────────────

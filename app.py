@@ -177,14 +177,30 @@ COLUMN_ALIASES = {
 
 
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    rename_map = {}
+    # Strip leading/trailing whitespace from column names first
+    df = df.rename(columns=lambda c: c.strip() if isinstance(c, str) else c)
+
     lower_cols = {c.lower(): c for c in df.columns}
+    rename_map: dict = {}
+
+    # Canonical names + aliases, all matched case-insensitively.
+    # Also handles the common case where someone exports a CSV with
+    # Title_Case or UPPER_CASE column names.
     for canonical, aliases in COLUMN_ALIASES.items():
         if canonical not in df.columns:
-            for alias in aliases:
-                if alias.lower() in lower_cols:
-                    rename_map[lower_cols[alias.lower()]] = canonical
+            for name in [canonical] + aliases:
+                if name.lower() in lower_cols:
+                    rename_map[lower_cols[name.lower()]] = canonical
                     break
+
+    # Lowercase any optional columns that arrived with different casing
+    # (e.g. "NOX_Conversion_Pct" → "nox_conversion_pct")
+    all_expected = set(REQUIRED_FIELDS) | set(OPTIONAL_FIELDS)
+    for col in list(df.columns):
+        target = col.lower()
+        if col not in rename_map and target in all_expected and col != target:
+            rename_map[col] = target
+
     return df.rename(columns=rename_map)
 
 
@@ -1116,7 +1132,15 @@ def main():
 
         if st.session_state.get("_scored_key") != cache_key:
             with st.spinner("Running DPF health assessment..."):
-                results = run_expert_system(df)
+                try:
+                    results = run_expert_system(df)
+                except Exception as _score_err:
+                    st.error(
+                        f"**Scoring failed:** {_score_err}\n\n"
+                        "Check that your CSV has the required columns with numeric values "
+                        "and no blank cells in required fields."
+                    )
+                    return
             st.session_state["_scored_results"] = results
             st.session_state["_scored_key"]     = cache_key
         else:
