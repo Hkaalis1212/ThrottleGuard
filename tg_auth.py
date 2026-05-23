@@ -249,6 +249,7 @@ def delete_user(username: str) -> bool:
         conn.close()
 
 
+@st.cache_data(ttl=300)
 def get_all_users() -> list[dict]:
     """Return all users (without password hashes). Admin-only use."""
     conn = get_conn()
@@ -433,6 +434,7 @@ def user_management_panel() -> None:
                 st.error("Username and password are required.")
             elif create_user(new_username, new_password, new_role):
                 st.success(f"User '{new_username}' created as {new_role}.")
+                get_all_users.clear()
                 st.rerun()
             else:
                 st.error(f"Username '{new_username}' already exists.")
@@ -451,6 +453,7 @@ def user_management_panel() -> None:
             if st.form_submit_button("Remove User", type="secondary"):
                 if delete_user(to_delete):
                     st.success(f"User '{to_delete}' removed.")
+                    get_all_users.clear()
                     st.rerun()
                 else:
                     st.error("Cannot remove the last Admin account.")

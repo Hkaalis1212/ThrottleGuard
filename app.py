@@ -675,7 +675,9 @@ def _render_outcomes_tab():
 def _render_subscription_tab():
     render_section_header("Subscription", "Billing and plan management")
 
-    sub = get_subscription("admin")
+    if "_sub_info" not in st.session_state:
+        st.session_state["_sub_info"] = get_subscription("admin")
+    sub = st.session_state["_sub_info"]
     if sub:
         status_color = "#43a047" if sub["status"] == "active" else "#e53935"
         st.markdown(
@@ -726,7 +728,8 @@ def _render_subscription_tab():
                     result = confirm_payment("admin", plan, payment_intent_id.strip())
                     if result["success"]:
                         st.success(f"Subscribed until {result['end_date'].strftime('%B %d, %Y')}.")
-                        st.session_state.pop("tg_plan_selected", None)
+                        for _k in ("tg_plan_selected", "_sub_info", "_sub_active", "_payment_history"):
+                            st.session_state.pop(_k, None)
                         st.rerun()
                     else:
                         st.error(result["error"])
@@ -740,13 +743,17 @@ def _render_subscription_tab():
             result = cancel_subscription("admin")
             if result["success"]:
                 st.success("Subscription cancelled. Access continues until expiry.")
+                st.session_state.pop("_sub_info", None)
+                st.session_state.pop("_sub_active", None)
                 st.rerun()
             else:
                 st.error(result["error"])
         st.markdown("---")
 
     render_section_header("Payment History", "")
-    history = get_payment_history("admin")
+    if "_payment_history" not in st.session_state:
+        st.session_state["_payment_history"] = get_payment_history("admin")
+    history = st.session_state["_payment_history"]
     if history:
         st.dataframe(
             pd.DataFrame(history)[["payment_date", "plan_type", "amount", "status", "transaction_id"]],
@@ -999,6 +1006,7 @@ def main():
                 "_scored_key", "_scored_results", "demo_df", "tg_plan_selected",
                 "tg_tour_active", "tg_tour_step", "scored_df",
                 "_sub_active", "_auth_db_ready", "_pending_predictions",
+                "_sub_info", "_payment_history",
             ]:
                 st.session_state.pop(_k, None)
             st.rerun()
