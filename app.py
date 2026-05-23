@@ -1047,42 +1047,60 @@ def main():
     with tab_map["Dashboard"]:
         tutorial_callout("demo")
 
+        # When a sub-tab widget is clicked, Streamlit reruns the script.
+        # On that rerun, st.file_uploader returns None (file gone from uploader state)
+        # which previously triggered the early return and left sub-tabs empty.
+        # Fix: store df in session state on first upload so it survives reruns.
         if uploaded is not None:
-            df = pd.read_csv(uploaded)
+            df = normalize_columns(pd.read_csv(uploaded))
+            missing_cols, optional_present = check_columns(df)
+            if missing_cols:
+                st.error(
+                    f"**Missing required columns:** {', '.join(missing_cols)}\n\n"
+                    "Rename your CSV columns to match or add them before uploading."
+                )
+                st.markdown(
+                    f'<div style="font-family:\'JetBrains Mono\',monospace;font-size:0.78rem;color:#4a6070;">'
+                    f'Columns found: {", ".join(df.columns.tolist())}</div>',
+                    unsafe_allow_html=True,
+                )
+                st.session_state.pop("_scored_key", None)  # clear stale cache
+                return
+            # Persist the parsed df so reruns (tab clicks) can use it
+            st.session_state["_active_df"]       = df
+            st.session_state["_active_optional"] = optional_present
+
         elif "demo_df" in st.session_state:
-            df = st.session_state["demo_df"].copy()
+            df               = st.session_state["demo_df"].copy()
+            df               = normalize_columns(df)
+            _, optional_present = check_columns(df)
+            st.session_state["_active_df"]       = df
+            st.session_state["_active_optional"] = optional_present
+
+        elif "_active_df" in st.session_state:
+            # Tab-click rerun: file uploader is empty but we still have the df
+            df               = st.session_state["_active_df"]
+            optional_present = st.session_state.get("_active_optional", [])
+
         else:
             _render_landing()
             return
 
-        df = normalize_columns(df)
-        missing_cols, optional_present = check_columns(df)
+        optional_present = st.session_state.get("_active_optional", [])
 
-        if missing_cols:
-            st.error(
-                f"**Missing required columns:** {', '.join(missing_cols)}\n\n"
-                "Rename your CSV columns to match or add them before uploading."
-            )
-            st.markdown(
-                f'<div style="font-family:\'JetBrains Mono\',monospace;font-size:0.78rem;color:#4a6070;">'
-                f'Columns found: {", ".join(df.columns.tolist())}</div>',
-                unsafe_allow_html=True,
-            )
-            return
+        # Only rescore when the data actually changes (filename + row count as key)
+        src_name  = getattr(uploaded, 'name', 'demo') if uploaded is not None else st.session_state.get("_active_src", "demo")
+        cache_key = f"{src_name}_{len(df)}"
+        if uploaded is not None:
+            st.session_state["_active_src"] = uploaded.name
 
-        # Cache results in session state so switching tabs (which triggers reruns)
-        # doesn't rescore the fleet on every click. Key on file name + row count
-        # so a new upload always rescores, but tab interactions reuse the result.
-        cache_key = f"{getattr(uploaded, 'name', 'demo')}_{len(df)}"
         if st.session_state.get("_scored_key") != cache_key:
             with st.spinner("Running DPF health assessment..."):
                 results = run_expert_system(df)
             st.session_state["_scored_results"] = results
             st.session_state["_scored_key"]     = cache_key
-            st.session_state["_scored_optional"] = optional_present
         else:
-            results          = st.session_state["_scored_results"]
-            optional_present = st.session_state.get("_scored_optional", optional_present)
+            results = st.session_state["_scored_results"]
 
         sub_tabs = st.tabs(["Fleet Overview", "Dispatch Blocklist", "Vehicle Detail", "Raw Data"])
 
