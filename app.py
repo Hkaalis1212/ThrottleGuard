@@ -953,7 +953,7 @@ def main():
     with col_signout:
         st.markdown("<div style='padding-top:0.5rem;'></div>", unsafe_allow_html=True)
         if st.button("Sign Out", use_container_width=True):
-            st.session_state["tg_user"] = None
+            st.session_state.clear()
             st.rerun()
 
     # ── Sidebar ───────────────────────────────────────────────────────────────
@@ -1070,8 +1070,19 @@ def main():
             )
             return
 
-        with st.spinner("Running DPF health assessment..."):
-            results = run_expert_system(df)
+        # Cache results in session state so switching tabs (which triggers reruns)
+        # doesn't rescore the fleet on every click. Key on file name + row count
+        # so a new upload always rescores, but tab interactions reuse the result.
+        cache_key = f"{getattr(uploaded, 'name', 'demo')}_{len(df)}"
+        if st.session_state.get("_scored_key") != cache_key:
+            with st.spinner("Running DPF health assessment..."):
+                results = run_expert_system(df)
+            st.session_state["_scored_results"] = results
+            st.session_state["_scored_key"]     = cache_key
+            st.session_state["_scored_optional"] = optional_present
+        else:
+            results          = st.session_state["_scored_results"]
+            optional_present = st.session_state.get("_scored_optional", optional_present)
 
         sub_tabs = st.tabs(["Fleet Overview", "Dispatch Blocklist", "Vehicle Detail", "Raw Data"])
 
