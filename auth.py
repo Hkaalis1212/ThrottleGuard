@@ -30,12 +30,10 @@ def _google_gate() -> None:
     from streamlit_google_auth import Authenticate
 
     authenticator = Authenticate(
-        secret_credentials_path=None,
+        secret_credentials_path="google_credentials.json",
         cookie_name="throttleguard_auth",
         cookie_key=os.environ.get("SESSION_SECRET", "throttleguard"),
         redirect_uri=os.environ.get("REDIRECT_URI"),
-        client_id=os.environ.get("GOOGLE_CLIENT_ID"),
-        client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
     )
 
     authenticator.check_authentification()

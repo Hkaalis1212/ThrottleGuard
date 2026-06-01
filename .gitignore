@@ -1,6 +1,7 @@
 # ── Secrets — NEVER commit ────────────────────────────────────────────────────
 .env
 reset_admin_password.py
+google_credentials.json
 
 # ── Runtime-generated files — recreated on startup ───────────────────────────
 predictions.db
