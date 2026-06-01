@@ -22,12 +22,44 @@ def _ensure_db_ready() -> None:
         st.session_state["_auth_db_ready"] = True
 
 
+def _write_credentials_file() -> None:
+    """
+    Build google_credentials.json at runtime from env vars so Railway only
+    needs GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in its Variables panel.
+    Skips if the file already exists with a real secret (local dev workflow).
+    """
+    import json
+
+    creds_path = "google_credentials.json"
+
+    client_id     = os.environ.get("GOOGLE_CLIENT_ID", "")
+    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+    redirect_uri  = os.environ.get("REDIRECT_URI", "")
+
+    # Only overwrite if we have real env var values — avoids clobbering a
+    # locally-edited file that already has the secret filled in.
+    if client_id and client_secret:
+        payload = {
+            "web": {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uris": [redirect_uri],
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }
+        }
+        with open(creds_path, "w") as f:
+            json.dump(payload, f)
+
+
 def _google_gate() -> None:
     """
     Run the Google OAuth flow.
     Sets st.session_state['tg_user'] on success, calls st.stop() if not yet authenticated.
     """
     from streamlit_google_auth import Authenticate
+
+    _write_credentials_file()
 
     authenticator = Authenticate(
         secret_credentials_path="google_credentials.json",
