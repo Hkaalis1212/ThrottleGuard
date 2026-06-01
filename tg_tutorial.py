@@ -28,9 +28,10 @@ STEPS = [
         "title":   "Welcome to ThrottleGuard",
         "icon":    "👋",
         "body":    (
-            "ThrottleGuard monitors your fleet's DPF health in real time — "
+            "ThrottleGuard monitors your fleet's DPF and SCR health — "
             "so you know which trucks are safe to dispatch **before** they break down on the road.\n\n"
-            "This tour takes about 2 minutes. Click **Next** to begin."
+            "This tour covers the full workflow for dispatchers and technicians. "
+            "Click **Next** to begin."
         ),
         "tip":     None,
     },
@@ -71,16 +72,28 @@ STEPS = [
         "tip":     "alert",
     },
     {
+        "id":      "dispatch",
+        "title":   "Dispatch Blocklist",
+        "icon":    "🚫",
+        "body":    (
+            "Click the **Dispatch Blocklist** sub-tab.\n\n"
+            "This is the list your dispatcher prints or pulls up every morning. "
+            "Every truck on it is CRITICAL or HIGH — it should not leave the yard "
+            "without a tech signing off.\n\n"
+            "The reason is right there in plain English, so no one has to guess."
+        ),
+        "tip":     "dispatch",
+    },
+    {
         "id":      "detail",
         "title":   "Truck Detail — Why This Score?",
         "icon":    "🔍",
         "body":    (
-            "Expand any truck to see:\n\n"
+            "Click **Vehicle Detail** and expand any truck to see:\n\n"
             "- **Exact rules that fired** — e.g. 'Low regen temp (<940°F)'\n"
-            "- **Confidence** — how many rules agreed (HIGH = 3+ rules, MEDIUM = 2, LOW = 1)\n"
-            "- **Trend** — is this truck getting worse, improving, or stable?\n"
+            "- **Confidence** — how many rules agreed\n"
             "- **Recommended action** — specific next step for your tech\n\n"
-            "Try expanding **TRK-001** — it has 5 rules fired across DPF and SCR."
+            "Try expanding **TRK-001** — it has rules fired across both DPF and SCR."
         ),
         "tip":     "detail",
     },
@@ -89,12 +102,52 @@ STEPS = [
         "title":   "Fleet Scores — Full Picture",
         "icon":    "📋",
         "body":    (
-            "Switch to the **Fleet Scores** tab in the navigation above.\n\n"
-            "Every truck in the fleet, sorted Priority → Score. "
-            "Filter by priority, upload a scored CSV, or use the pre-loaded demo.\n\n"
+            "Click the **Fleet Scores** tab above.\n\n"
+            "Every truck sorted Priority → Score. "
+            "Filter by priority, search by truck ID, or download the full table.\n\n"
             "This is what you send to your shop foreman each morning."
         ),
         "tip":     "scores_tab",
+    },
+    {
+        "id":      "upload",
+        "title":   "Upload Your Own Fleet Data",
+        "icon":    "📂",
+        "body":    (
+            "When you're ready to use your real data, export a CSV from your telematics "
+            "system or ELD and upload it in the sidebar.\n\n"
+            "Required columns: vehicle_id, dpf_outlet_temp_active_regen_f, "
+            "dpf_outlet_temp_peak_f, dpf_inlet_temp_f, regen_count_7d, back_pressure_inh2o.\n\n"
+            "16 optional columns add more accuracy — see the template on the landing page."
+        ),
+        "tip":     "upload",
+    },
+    {
+        "id":      "outcomes",
+        "title":   "Log What Actually Happened",
+        "icon":    "✅",
+        "body":    (
+            "After a truck comes back from service, open the **Outcomes** tab and log "
+            "whether the failure actually occurred.\n\n"
+            "This builds your ground truth over time and lets you see how accurate "
+            "the expert system is on your specific fleet.\n\n"
+            "Technicians and Admins can log outcomes — Viewers are read-only."
+        ),
+        "tip":     "outcomes",
+    },
+    {
+        "id":      "done",
+        "title":   "You're All Set",
+        "icon":    "🎉",
+        "body":    (
+            "That's the full workflow:\n\n"
+            "1. Upload your fleet CSV each morning\n"
+            "2. Dispatcher checks KPIs and the blocklist\n"
+            "3. Tech drills into flagged trucks for exact rules\n"
+            "4. After service, log the outcome\n\n"
+            "Questions? Reach us at **support@throttleguard.app**."
+        ),
+        "tip":     None,
     },
 ]
 
@@ -210,16 +263,22 @@ def tutorial_callout(section: str):
         "demo":       "🚛",
         "kpi":        "📊",
         "alert":      "🚨",
+        "dispatch":   "🚫",
         "detail":     "🔍",
         "scores_tab": "📋",
+        "upload":     "📂",
+        "outcomes":   "✅",
     }
 
     labels = {
         "demo":       "Load demo data first — click the button in the sidebar.",
         "kpi":        "👆 These four tiles are your morning brief.",
         "alert":      "👆 Every flagged truck is listed here with a plain-English reason.",
+        "dispatch":   "👆 This is the blocklist — trucks that must not leave the yard today.",
         "detail":     "👆 Expand any truck to see which rules fired and why.",
         "scores_tab": "👆 Click Fleet Scores in the navigation to see the full fleet table.",
+        "upload":     "👆 Upload your own CSV here when you're ready to use real data.",
+        "outcomes":   "👆 After a truck is serviced, log whether the failure was confirmed here.",
     }
 
     icon  = icons.get(section, "ℹ️")

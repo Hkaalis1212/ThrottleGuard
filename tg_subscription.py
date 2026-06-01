@@ -4,12 +4,13 @@ tg_subscription.py — ThrottleGuard Subscription Management
 Subscription is per-fleet (per Railway deployment).
 Each fleet has one subscription row tied to their admin account.
 
-Plans
------
-  trial   — 14 days free, full access
-  starter — $59.99 / month  (1–25 trucks)
-  growth  — $149.00 / month (26–100 trucks)
-  fleet   — $399.00 / month (101–500 trucks)
+Pricing (per truck / month)
+---------------------------
+  trial      — 14 days free, full access, no card
+  starter    — $39/truck/mo  (1–10 trucks)
+  growth     — $29/truck/mo  (11–50 trucks)
+  fleet      — $19/truck/mo  (51–250 trucks)
+  enterprise — 250+ trucks, custom quote
 
 Tables (Supabase PostgreSQL)
 ----------------------------
@@ -38,34 +39,31 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 
 # ── Pricing ───────────────────────────────────────────────────────────────────
 
-PRICING = {
-    "starter":    59.99,   # 1–25 trucks
-    "growth":    149.00,   # 26–100 trucks
-    "fleet":     399.00,   # 101–500 trucks
-    "trial_days": 14,
-}
+TRIAL_DAYS = 14
 
-# Fleet-size ranges for each tier — used for display and auto-selection
-PLAN_TRUCK_LIMITS = {
-    "starter": (1,   25),
-    "growth":  (26,  100),
-    "fleet":   (101, 500),
-}
+# Per-truck / month tiers. Amount = fleet_size × per_truck rate.
+# Enterprise (250+) is custom — no automated checkout.
+PRICING_TIERS = [
+    {"key": "starter",    "label": "Starter",    "min": 1,   "max": 10,  "per_truck": 39.00},
+    {"key": "growth",     "label": "Growth",     "min": 11,  "max": 50,  "per_truck": 29.00},
+    {"key": "fleet",      "label": "Fleet",      "min": 51,  "max": 250, "per_truck": 19.00},
+]
 
-PLAN_DAYS = {
-    "starter": 30,
-    "growth":  30,
-    "fleet":   30,
-}
 
-# Stripe Price IDs — create these in dashboard.stripe.com → Products
-# starter: price already exists at $59.99/mo (reused from previous monthly plan)
-# growth / fleet: create new prices and replace the TODO placeholders
-STRIPE_PRICE_IDS = {
-    "starter": "price_1TIDJvALl8vDltuMscHbk9a9",  # $59.99/mo — existing
-    "growth":  "price_TODO_growth",                 # $149/mo  — create in Stripe
-    "fleet":   "price_TODO_fleet",                  # $399/mo  — create in Stripe
-}
+def get_tier_for_fleet(fleet_size: int) -> dict | None:
+    """Return the pricing tier dict for fleet_size, or None for enterprise (250+)."""
+    for tier in PRICING_TIERS:
+        if tier["min"] <= fleet_size <= tier["max"]:
+            return tier
+    return None
+
+
+def monthly_price(fleet_size: int) -> float | None:
+    """Return total monthly price for a fleet, or None if enterprise (250+)."""
+    tier = get_tier_for_fleet(fleet_size)
+    if tier is None:
+        return None
+    return fleet_size * tier["per_truck"]
 
 # ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -162,7 +160,7 @@ def start_trial(fleet_id: str) -> dict:
         return {"success": False, "error": "Subscription already exists."}
 
     now     = datetime.utcnow()
-    end     = now + timedelta(days=PRICING["trial_days"])
+    end     = now + timedelta(days=TRIAL_DAYS)
     conn    = get_conn()
     try:
         with conn:
@@ -175,7 +173,7 @@ def start_trial(fleet_id: str) -> dict:
                 """,
                 (fleet_id, "trial", "active", now.isoformat(), end.isoformat(), 0.0, now.isoformat()),
             )
-        return {"success": True, "days": PRICING["trial_days"], "end_date": end}
+        return {"success": True, "days": TRIAL_DAYS, "end_date": end}
     except Exception as e:
         logger.error(f"[TG Sub] start_trial error: {e}")
         return {"success": False, "error": str(e)}
@@ -183,39 +181,52 @@ def start_trial(fleet_id: str) -> dict:
         conn.close()
 
 
-def create_payment_intent(fleet_id: str, plan_type: str) -> dict:
+def create_payment_intent(fleet_id: str, fleet_size: int) -> dict:
     """
-    Create a Stripe PaymentIntent. Returns {success, client_secret, amount} or {success, error}.
+    Create a Stripe PaymentIntent for fleet_size trucks.
+    Amount = fleet_size × per_truck rate for their tier.
+    Returns {success, client_secret, amount, tier} or {success, error}.
     """
     if not stripe.api_key:
         return {"success": False, "error": "Stripe is not configured — set STRIPE_SECRET_KEY."}
-    if plan_type not in PRICING:
-        return {"success": False, "error": f"Unknown plan: {plan_type}"}
 
-    amount_cents = int(PRICING[plan_type] * 100)
+    tier = get_tier_for_fleet(fleet_size)
+    if tier is None:
+        return {"success": False, "error": "Enterprise fleets (250+ trucks) require a custom quote. Contact us."}
+
+    price = monthly_price(fleet_size)
+    amount_cents = int(round(price * 100))
+
     try:
         intent = stripe.PaymentIntent.create(
             amount=amount_cents,
             currency="usd",
             metadata={
-                "fleet_id": fleet_id,
-                "plan_type": plan_type,
-                "stripe_price_id": STRIPE_PRICE_IDS.get(plan_type, ""),
+                "fleet_id":      fleet_id,
+                "fleet_size":    fleet_size,
+                "tier_key":      tier["key"],
+                "per_truck_rate": tier["per_truck"],
             },
         )
-        return {"success": True, "client_secret": intent.client_secret, "amount": PRICING[plan_type]}
+        return {"success": True, "client_secret": intent.client_secret, "amount": price, "tier": tier}
     except stripe.error.StripeError as e:
         logger.error(f"[TG Sub] Stripe error: {e}")
         return {"success": False, "error": str(e)}
 
 
-def confirm_payment(fleet_id: str, plan_type: str, payment_intent_id: str) -> dict:
+def confirm_payment(fleet_id: str, fleet_size: int, payment_intent_id: str) -> dict:
     """
     Verify payment succeeded with Stripe, then create/upgrade the subscription.
+    fleet_size is used to re-derive the expected amount — prevents a tampered
+    PaymentIntent from granting access at a lower price.
     Returns {success, error?}.
     """
     if not stripe.api_key:
         return {"success": False, "error": "Stripe is not configured."}
+
+    tier = get_tier_for_fleet(fleet_size)
+    if tier is None:
+        return {"success": False, "error": "Enterprise fleets (250+) require a custom contract."}
 
     try:
         intent = stripe.PaymentIntent.retrieve(payment_intent_id)
@@ -225,30 +236,27 @@ def confirm_payment(fleet_id: str, plan_type: str, payment_intent_id: str) -> di
     if intent.status != "succeeded":
         return {"success": False, "error": f"Payment not completed (status: {intent.status})."}
 
-    # Verify the amount matches the plan price — prevents a tampered intent
-    # from activating a more expensive plan at a lower price
-    expected_cents = round(PRICING[plan_type] * 100)
+    expected_cents = round(monthly_price(fleet_size) * 100)
     if intent.amount != expected_cents:
         logger.error(
-            f"[TG Sub] Amount mismatch for plan {plan_type}: "
+            f"[TG Sub] Amount mismatch for fleet_size={fleet_size}: "
             f"expected {expected_cents} cents, got {intent.amount}"
         )
-        return {"success": False, "error": "Payment amount does not match plan price."}
+        return {"success": False, "error": "Payment amount does not match the expected price for your fleet size."}
 
-    amount  = PRICING[plan_type]
-    now     = datetime.utcnow()
-    end     = now + timedelta(days=PLAN_DAYS[plan_type])
+    amount    = monthly_price(fleet_size)
+    plan_type = tier["key"]
+    now       = datetime.utcnow()
+    end       = now + timedelta(days=30)
 
     conn = get_conn()
     try:
         with conn:
             cur = conn.cursor()
-            # Cancel any existing subscription
             cur.execute(
                 "UPDATE tg_subscriptions SET status = 'cancelled' WHERE fleet_id = %s AND status = 'active'",
                 (fleet_id,),
             )
-            # Create new subscription
             cur.execute(
                 """
                 INSERT INTO tg_subscriptions
@@ -257,7 +265,6 @@ def confirm_payment(fleet_id: str, plan_type: str, payment_intent_id: str) -> di
                 """,
                 (fleet_id, plan_type, now.isoformat(), end.isoformat(), amount, now.isoformat()),
             )
-            # Log payment
             cur.execute(
                 """
                 INSERT INTO tg_payment_history

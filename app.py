@@ -14,6 +14,7 @@ Workflow:
 from dotenv import load_dotenv
 load_dotenv()
 
+import os
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -21,12 +22,14 @@ from datetime import date
 
 from dpf_expert_system import calculate_expert_score, REQUIRED_FIELDS, OPTIONAL_FIELDS
 from outcome_db import log_prediction, log_predictions_batch, init_db, get_predictions, record_outcome, get_validation_summary, get_calibration_data
-from tg_auth import init_auth_db, login_page, can_do, user_management_panel
+from tg_auth import init_auth_db, login_page, can_do, user_management_panel, get_or_create_google_user
+from auth import run_auth_gate, clear_auth_session
 from tg_tutorial import render_tutorial_sidebar, tutorial_callout
 from tg_subscription import (
     is_active, start_trial, get_subscription,
     create_payment_intent, confirm_payment, get_payment_history,
-    cancel_subscription, PRICING,
+    cancel_subscription, PRICING_TIERS, TRIAL_DAYS,
+    get_tier_for_fleet, monthly_price,
 )
 from tg_styles import (
     inject_styles,
@@ -39,15 +42,7 @@ from tg_styles import (
 )
 
 # ── Auth gate ─────────────────────────────────────────────────────────────────
-# Guard init_auth_db() so it only opens a DB connection once per session,
-# not on every Streamlit rerun (every tab click / widget interaction).
-if "_auth_db_ready" not in st.session_state:
-    init_auth_db()
-    st.session_state["_auth_db_ready"] = True
-
-if "tg_user" not in st.session_state or not st.session_state["tg_user"]:
-    login_page()
-    st.stop()
+run_auth_gate()
 
 # ── Subscription gate ─────────────────────────────────────────────────────────
 _fleet_id = "admin"
@@ -70,87 +65,95 @@ if not st.session_state["_sub_active"]:
     if _sub is None:
         st.markdown("## Start Your Free Trial")
         st.markdown(
-            f"Get **{PRICING['trial_days']} days free** — full access, no credit card required.\n\n"
-            f"After your trial: **${PRICING['starter']:.2f}/mo** (1–25 trucks), "
-            f"**${PRICING['growth']:.2f}/mo** (26–100 trucks), or "
-            f"**${PRICING['fleet']:.2f}/mo** (101–500 trucks)."
+            f"Get **{TRIAL_DAYS} days free** — full access, no credit card required.\n\n"
+            "After your trial, pay only for the trucks you run:"
         )
+        for _t in PRICING_TIERS:
+            st.markdown(f"- **{_t['label']}** ({_t['min']}–{_t['max']} trucks): **${_t['per_truck']:.0f}/truck/mo**")
+        st.markdown("- **Enterprise** (250+ trucks): Custom quote")
         if st.button("Start Free Trial", type="primary", use_container_width=True):
             result = start_trial(_fleet_id)
             if result["success"]:
-                st.success(f"Trial started — {PRICING['trial_days']} days of full access.")
-                st.session_state.pop("_sub_active", None)  # force re-check on next run
+                st.success(f"Trial started — {TRIAL_DAYS} days of full access.")
+                st.session_state.pop("_sub_active", None)
                 st.rerun()
             else:
                 st.error(result["error"])
     else:
         st.markdown("## Your Trial Has Ended")
-        st.markdown("Choose a plan to continue accessing ThrottleGuard.")
+        st.markdown("Enter your fleet size to see your monthly price, then subscribe to continue.")
 
-        col_s, col_g, col_f = st.columns(3)
-        with col_s:
-            st.markdown(
-                f"### Starter\n"
-                f"**1–25 trucks**\n\n"
-                f"**${PRICING['starter']:.2f}** / month\n\n"
-                "Cancel anytime."
+        # Per-truck pricing reference table
+        _tier_cols = st.columns(3)
+        for _col, _t in zip(_tier_cols, PRICING_TIERS):
+            _col.markdown(
+                f"**{_t['label']}**  \n"
+                f"{_t['min']}–{_t['max']} trucks  \n"
+                f"**${_t['per_truck']:.0f}** / truck / mo"
             )
-            if st.button("Subscribe — Starter", use_container_width=True):
-                st.session_state["tg_plan_selected"] = "starter"
 
-        with col_g:
-            st.markdown(
-                f"### Growth\n"
-                f"**26–100 trucks**\n\n"
-                f"**${PRICING['growth']:.2f}** / month\n\n"
-                "Cancel anytime."
+        st.markdown("---")
+        _fleet_size = st.number_input(
+            "How many trucks are in your fleet?",
+            min_value=1,
+            max_value=10000,
+            value=st.session_state.get("tg_fleet_size_input", 10),
+            step=1,
+            key="tg_fleet_size_input",
+        )
+        _tier = get_tier_for_fleet(_fleet_size)
+        _price = monthly_price(_fleet_size)
+
+        if _tier is None:
+            st.info(
+                f"Fleets of 250+ trucks qualify for **custom enterprise pricing**. "
+                "Contact us at [sales@throttleguard.app](mailto:sales@throttleguard.app) for a quote."
             )
-            if st.button("Subscribe — Growth", type="primary", use_container_width=True):
-                st.session_state["tg_plan_selected"] = "growth"
-
-        with col_f:
+        else:
             st.markdown(
-                f"### Fleet\n"
-                f"**101–500 trucks**\n\n"
-                f"**${PRICING['fleet']:.2f}** / month\n\n"
-                "Cancel anytime."
+                f"**{_tier['label']} tier** — ${_tier['per_truck']:.0f}/truck × {_fleet_size} trucks "
+                f"= **${_price:,.2f} / month**"
             )
-            if st.button("Subscribe — Fleet", type="primary", use_container_width=True):
-                st.session_state["tg_plan_selected"] = "fleet"
+            if st.button(
+                f"Subscribe — ${_price:,.2f}/mo ({_fleet_size} trucks)",
+                type="primary",
+                use_container_width=True,
+            ):
+                st.session_state["tg_fleet_size_pay"] = _fleet_size
 
-        plan = st.session_state.get("tg_plan_selected")
-        plan_labels = {
-            "starter": "Starter (1–25 trucks)",
-            "growth":  "Growth (26–100 trucks)",
-            "fleet":   "Fleet (101–500 trucks)",
-        }
-        if plan:
+        _pay_size = st.session_state.get("tg_fleet_size_pay")
+        _pay_tier = get_tier_for_fleet(_pay_size) if _pay_size else None
+        _pay_price = monthly_price(_pay_size) if _pay_size else None
+        if _pay_size and _pay_tier:
             st.markdown("---")
-            st.markdown(f"**{plan_labels.get(plan, plan)} — ${PRICING[plan]:.2f}/mo**")
-            intent_result = create_payment_intent(_fleet_id, plan)
+            st.markdown(f"**{_pay_tier['label']} — {_pay_size} trucks — ${_pay_price:,.2f}/mo**")
+            intent_result = create_payment_intent(_fleet_id, _pay_size)
             if not intent_result["success"]:
                 st.error(intent_result["error"])
             else:
-                st.info("Enter your payment details below. After payment, paste the Payment Intent ID to activate.")
+                st.info("Complete payment in Stripe, then paste the Payment Intent ID below to activate.")
                 payment_intent_id = st.text_input("Payment Intent ID (from Stripe)")
                 if st.button("Confirm Payment", type="primary"):
                     if not payment_intent_id.strip():
                         st.error("Enter the Payment Intent ID from Stripe.")
                     else:
-                        result = confirm_payment(_fleet_id, plan, payment_intent_id.strip())
+                        result = confirm_payment(_fleet_id, _pay_size, payment_intent_id.strip())
                         if result["success"]:
                             st.success(f"Subscribed! Access active until {result['end_date'].strftime('%B %d, %Y')}.")
                             st.session_state.pop("_sub_active", None)
+                            st.session_state.pop("tg_fleet_size_pay", None)
                             st.rerun()
                         else:
                             st.error(result["error"])
 
     st.markdown("---")
     if st.button("Sign out"):
-        for _k in ["tg_user", "tg_plan_selected", "_active_df", "_active_optional",
+        clear_auth_session()
+        for _k in ["tg_plan_selected", "tg_fleet_size_pay",
+                   "_active_df", "_active_optional",
                    "_active_src", "_scored_key", "_scored_results", "demo_df",
                    "tg_tour_active", "tg_tour_step", "scored_df",
-                   "_sub_active", "_auth_db_ready"]:
+                   "_sub_active"]:
             st.session_state.pop(_k, None)
         st.rerun()
     st.stop()
@@ -403,6 +406,7 @@ def _render_dashboard_tab(results: pd.DataFrame, optional_present: list):
 
 
 def _render_dispatch_tab(results: pd.DataFrame):
+    tutorial_callout("dispatch")
     render_section_header(
         "Do-Not-Dispatch List",
         "Vehicles with CRITICAL or HIGH risk that must not leave the yard without inspection",
@@ -480,6 +484,7 @@ def _render_fleet_scores_tab():
 
 
 def _render_outcomes_tab():
+    tutorial_callout("outcomes")
     render_section_header(
         "Outcome Tracking",
         "Log service outcomes to build ground truth and validate expert system accuracy over time",
@@ -683,40 +688,61 @@ def _render_subscription_tab():
 
     if not sub or sub["status"] != "active" or sub["plan_type"] == "trial":
         render_section_header("Upgrade Plan", "")
-        col_s, col_g, col_f = st.columns(3)
-        with col_s:
-            st.markdown(f"**Starter** — 1–25 trucks\n\n${PRICING['starter']:.2f}/mo · Cancel anytime.")
-            if st.button("Subscribe — Starter", use_container_width=True, key="sub_starter"):
-                st.session_state["tg_plan_selected"] = "starter"
-        with col_g:
-            st.markdown(f"**Growth** — 26–100 trucks\n\n${PRICING['growth']:.2f}/mo · Cancel anytime.")
-            if st.button("Subscribe — Growth", type="primary", use_container_width=True, key="sub_growth"):
-                st.session_state["tg_plan_selected"] = "growth"
-        with col_f:
-            st.markdown(f"**Fleet** — 101–500 trucks\n\n${PRICING['fleet']:.2f}/mo · Cancel anytime.")
-            if st.button("Subscribe — Fleet", type="primary", use_container_width=True, key="sub_fleet"):
-                st.session_state["tg_plan_selected"] = "fleet"
 
-        plan = st.session_state.get("tg_plan_selected")
-        plan_labels = {
-            "starter": "Starter (1–25 trucks)",
-            "growth":  "Growth (26–100 trucks)",
-            "fleet":   "Fleet (101–500 trucks)",
-        }
-        if plan:
-            st.markdown(f"**{plan_labels.get(plan, plan)} — ${PRICING[plan]:.2f}/mo**")
-            intent_result = create_payment_intent("admin", plan)
+        # Per-truck pricing reference cards
+        _up_cols = st.columns(3)
+        for _up_col, _t in zip(_up_cols, PRICING_TIERS):
+            _up_col.markdown(
+                f"**{_t['label']}** — {_t['min']}–{_t['max']} trucks  \n"
+                f"**${_t['per_truck']:.0f}** / truck / mo · Cancel anytime."
+            )
+
+        st.markdown("---")
+        _up_size = st.number_input(
+            "Your fleet size (trucks)",
+            min_value=1,
+            max_value=10000,
+            value=st.session_state.get("_upgrade_fleet_size", 10),
+            step=1,
+            key="_upgrade_fleet_size",
+        )
+        _up_tier = get_tier_for_fleet(_up_size)
+        _up_price = monthly_price(_up_size)
+
+        if _up_tier is None:
+            st.info(
+                "Fleets of 250+ trucks qualify for custom enterprise pricing. "
+                "Contact [sales@throttleguard.app](mailto:sales@throttleguard.app)."
+            )
+        else:
+            st.markdown(
+                f"**{_up_tier['label']} — {_up_size} trucks × ${_up_tier['per_truck']:.0f} "
+                f"= ${_up_price:,.2f}/mo**"
+            )
+            if st.button(
+                f"Subscribe — ${_up_price:,.2f}/mo",
+                type="primary",
+                use_container_width=True,
+                key="sub_pay_btn",
+            ):
+                st.session_state["_upgrade_fleet_size_pay"] = _up_size
+
+        _pay_size = st.session_state.get("_upgrade_fleet_size_pay")
+        _pay_tier = get_tier_for_fleet(_pay_size) if _pay_size else None
+        _pay_price = monthly_price(_pay_size) if _pay_size else None
+        if _pay_size and _pay_tier:
+            intent_result = create_payment_intent("admin", _pay_size)
             if not intent_result["success"]:
                 st.error(intent_result["error"])
             else:
                 st.code(intent_result["client_secret"], language=None)
                 st.caption("Use this client secret with your Stripe payment form.")
-                payment_intent_id = st.text_input("Payment Intent ID (from Stripe)")
-                if st.button("Confirm Payment", type="primary"):
-                    result = confirm_payment("admin", plan, payment_intent_id.strip())
+                payment_intent_id = st.text_input("Payment Intent ID (from Stripe)", key="upgrade_pi_id")
+                if st.button("Confirm Payment", type="primary", key="confirm_upgrade"):
+                    result = confirm_payment("admin", _pay_size, payment_intent_id.strip())
                     if result["success"]:
                         st.success(f"Subscribed until {result['end_date'].strftime('%B %d, %Y')}.")
-                        for _k in ("tg_plan_selected", "_sub_info", "_sub_active", "_payment_history"):
+                        for _k in ("_upgrade_fleet_size_pay", "_sub_info", "_sub_active", "_payment_history"):
                             st.session_state.pop(_k, None)
                         st.rerun()
                     else:
@@ -989,11 +1015,12 @@ def main():
     with col_signout:
         st.markdown("<div style='padding-top:0.5rem;'></div>", unsafe_allow_html=True)
         if st.button("Sign Out", use_container_width=True):
+            clear_auth_session()
             for _k in [
-                "tg_user", "_active_df", "_active_optional", "_active_src",
+                "_active_df", "_active_optional", "_active_src",
                 "_scored_key", "_scored_results", "demo_df", "tg_plan_selected",
                 "tg_tour_active", "tg_tour_step", "scored_df",
-                "_sub_active", "_auth_db_ready", "_pending_predictions",
+                "_sub_active", "_pending_predictions",
                 "_sub_info", "_payment_history",
             ]:
                 st.session_state.pop(_k, None)
@@ -1017,6 +1044,7 @@ def main():
                 st.session_state["demo_df"] = get_demo_fleet()
                 st.success("Demo fleet loaded — 30 trucks across Detroit, Volvo/Mack, Cummins/PACCAR")
 
+            tutorial_callout("upload")
             uploaded = st.file_uploader("Or upload your own CSV", type="csv")
 
         st.divider()

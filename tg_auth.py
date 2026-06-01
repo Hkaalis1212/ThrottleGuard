@@ -270,6 +270,39 @@ def can_do(action: str) -> bool:
     return action in ROLE_PERMISSIONS.get(role, set())
 
 
+def get_or_create_google_user(email: str) -> dict:
+    """
+    Look up a user by Google email (stored as username).
+    Auto-creates a Viewer account on first Google sign-in so admins
+    can promote them later in the User Management panel.
+    """
+    email = email.strip().lower()
+    conn = get_conn()
+    try:
+        with conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT username, role FROM tg_users WHERE username = %s", (email,))
+            row = cur.fetchone()
+            if row:
+                cur.execute(
+                    "UPDATE tg_users SET last_login = %s WHERE username = %s",
+                    (datetime.utcnow().isoformat(), email),
+                )
+                return {"username": row["username"], "role": row["role"]}
+            # First Google sign-in — create Viewer account with a random unusable password
+            salt    = secrets.token_hex(16)
+            pw_hash = _hash_password(secrets.token_hex(32), salt)
+            cur.execute(
+                "INSERT INTO tg_users (username, password_hash, salt, role, created_at) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (email, pw_hash, salt, "Viewer", datetime.utcnow().isoformat()),
+            )
+            print(f"[ThrottleGuard Auth] Auto-created Viewer account for Google user: {email}")
+            return {"username": email, "role": "Viewer"}
+    finally:
+        conn.close()
+
+
 # ── Streamlit login page ──────────────────────────────────────────────────────
 
 def login_page() -> None:

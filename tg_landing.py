@@ -39,18 +39,15 @@ from tg_logo import _svg_to_img_tag, get_logo_svg
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 
-# Stripe price IDs per tier — create growth/fleet prices in Stripe dashboard
-STRIPE_PRICE_IDS = {
-    "starter": "price_1TIDJvALl8vDltuMscHbk9a9",  # $59.99/mo — existing
-    "growth":  "price_TODO_growth",                 # $149/mo  — create in Stripe
-    "fleet":   "price_TODO_fleet",                  # $399/mo  — create in Stripe
-}
+# Per-truck / month tiers — amount = fleet_size × per_truck rate.
+# Enterprise (250+) is custom — no automated checkout.
+PRICING_TIERS = [
+    {"key": "starter", "label": "Starter", "min": 1,   "max": 10,  "per_truck": 39.00},
+    {"key": "growth",  "label": "Growth",  "min": 11,  "max": 50,  "per_truck": 29.00},
+    {"key": "fleet",   "label": "Fleet",   "min": 51,  "max": 250, "per_truck": 19.00},
+]
 
-PRICING = {
-    "starter": (59.99,  1,   25),   # (price, min_trucks, max_trucks)
-    "growth":  (149.00, 26,  100),
-    "fleet":   (399.00, 101, 500),
-}
+TRIAL_DAYS = 14
 
 BASE_URL = os.getenv("TG_LANDING_URL", "http://localhost:8502")
 APP_URL  = os.getenv("TG_APP_URL",     "http://localhost:8501")
@@ -184,34 +181,41 @@ def score_fleet_csv(file_bytes: bytes) -> tuple[pd.DataFrame | None, str | None]
 
 # ── Stripe checkout ───────────────────────────────────────────────────────────
 
-def recommended_plan(fleet_size: int) -> str:
-    """Return the tier key that matches this fleet size."""
-    if fleet_size <= 25:
-        return "starter"
-    elif fleet_size <= 100:
-        return "growth"
-    return "fleet"
+def recommended_tier(fleet_size: int) -> dict:
+    """Return the PRICING_TIERS entry matching fleet_size (defaults to starter for 0)."""
+    for t in PRICING_TIERS:
+        if t["min"] <= fleet_size <= t["max"]:
+            return t
+    return PRICING_TIERS[0]  # default: starter
 
 
-def create_checkout_url(email: str, plan: str = "starter") -> tuple[str | None, str | None]:
+def create_checkout_url(email: str, fleet_size: int = 10) -> tuple[str | None, str | None]:
     """
-    Create a Stripe Checkout Session for the given tier with 14-day free trial.
+    Create a Stripe Checkout Session with dynamic per-truck pricing.
+    Amount = fleet_size × per_truck rate. 14-day free trial, no card charged until day 15.
     Returns (checkout_url, error_msg).
     """
     if not stripe.api_key or stripe.api_key.startswith("sk_test_..."):
-        # No real key configured — return demo URL so the page still works locally
         return APP_URL, None
 
-    price_id = STRIPE_PRICE_IDS.get(plan, STRIPE_PRICE_IDS["starter"])
-    if "TODO" in price_id:
-        return None, f"Stripe price for the {plan.title()} plan has not been created yet. Add it to STRIPE_PRICE_IDS."
+    tier = recommended_tier(fleet_size)
+    amount_cents = int(round(fleet_size * tier["per_truck"] * 100))
+    product_name = f"ThrottleGuard {tier['label']} ({fleet_size} trucks)"
 
     try:
         session = stripe.checkout.Session.create(
             mode="subscription",
             customer_email=email if email else None,
-            line_items=[{"price": price_id, "quantity": 1}],
-            subscription_data={"trial_period_days": 14},
+            line_items=[{
+                "price_data": {
+                    "currency": "usd",
+                    "product_data": {"name": product_name},
+                    "unit_amount": amount_cents,
+                    "recurring": {"interval": "month"},
+                },
+                "quantity": 1,
+            }],
+            subscription_data={"trial_period_days": TRIAL_DAYS},
             success_url=f"{BASE_URL}/?checkout=success",
             cancel_url=f"{BASE_URL}/",
         )
@@ -492,11 +496,9 @@ def render_upload_form() -> tuple[str | None, bytes | None]:
 
 def render_cta(email: str, fleet_size: int = 0) -> None:
     """
-    Render the full-fleet CTA with tier selector.
-    Highlights the recommended tier based on fleet_size from the uploaded CSV.
+    Render the full-fleet CTA with per-truck pricing.
+    fleet_size pre-fills the truck count from the uploaded CSV.
     """
-    rec = recommended_plan(fleet_size) if fleet_size > 0 else "starter"
-
     st.markdown("""
     <div style="border-top:1px solid #1a2130;margin-top:1.75rem;padding-top:1.5rem;">
         <div style="text-align:center;margin-bottom:1.25rem;">
@@ -511,62 +513,56 @@ def render_cta(email: str, fleet_size: int = 0) -> None:
     </div>
     """, unsafe_allow_html=True)
 
-    # Tier selector — 3 columns, recommended tier highlighted
+    # Per-truck pricing cards (informational, no tier selection needed)
     tier_cols = st.columns(3)
-    tier_defs = [
-        ("starter", "Starter",  "1–25 trucks",   59.99),
-        ("growth",  "Growth",   "26–100 trucks", 149.00),
-        ("fleet",   "Fleet",    "101–500 trucks", 399.00),
-    ]
-
-    if "tg_landing_plan" not in st.session_state:
-        st.session_state["tg_landing_plan"] = rec
-
-    for col, (key, label, range_label, price) in zip(tier_cols, tier_defs):
-        is_selected = st.session_state["tg_landing_plan"] == key
-        border_color = "#e53935" if is_selected else "#1a2130"
-        rec_badge = (
-            ' <span style="background:#e53935;color:#fff;font-size:0.6rem;'
-            'font-weight:700;letter-spacing:0.1em;text-transform:uppercase;'
-            'padding:1px 6px;border-radius:3px;vertical-align:middle;">RECOMMENDED</span>'
-            if key == rec else ""
-        )
+    for col, t in zip(tier_cols, PRICING_TIERS):
         col.markdown(f"""
         <div style="
-            background:#0f1217;border:1px solid {border_color};
+            background:#0f1217;border:1px solid #1a2130;
             border-radius:6px;padding:0.9rem 1rem;text-align:center;
-            cursor:pointer;
         ">
             <div style="font-family:'Barlow Condensed',sans-serif;font-size:1rem;
-                font-weight:700;color:#e8edf2;">{label}{rec_badge}</div>
+                font-weight:700;color:#e8edf2;">{t['label']}</div>
             <div style="font-family:'Barlow',sans-serif;font-size:0.72rem;
-                color:#6b7280;margin:2px 0 6px;">{range_label}</div>
+                color:#6b7280;margin:2px 0 6px;">{t['min']}–{t['max']} trucks</div>
             <div style="font-family:'JetBrains Mono',monospace;font-size:1.2rem;
-                font-weight:600;color:#e8edf2;">${price:.2f}<span
-                style="font-size:0.75rem;color:#4a6070;">/mo</span></div>
+                font-weight:600;color:#e8edf2;">${t['per_truck']:.0f}<span
+                style="font-size:0.75rem;color:#4a6070;">/truck/mo</span></div>
         </div>
         """, unsafe_allow_html=True)
-        if col.button(
-            "Select" if not is_selected else "Selected ✓",
-            key=f"tier_{key}",
-            use_container_width=True,
-            type="primary" if is_selected else "secondary",
-        ):
-            st.session_state["tg_landing_plan"] = key
-            st.rerun()
 
-    st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
 
-    chosen_plan = st.session_state.get("tg_landing_plan", rec)
-    chosen_price = dict(zip([t[0] for t in tier_defs], [t[3] for t in tier_defs]))[chosen_plan]
+    # Fleet size input — pre-filled from CSV if available
+    _default_size = max(1, fleet_size) if fleet_size > 0 else 10
+    _size = st.number_input(
+        "Your fleet size (trucks)",
+        min_value=1,
+        max_value=10000,
+        value=_default_size,
+        step=1,
+        key="tg_landing_fleet_size",
+    )
+
+    # Dynamic monthly total
+    _tier = recommended_tier(_size)
+    _total = _size * _tier["per_truck"]
+    st.markdown(
+        f"<div style='font-family:\"Barlow\",sans-serif;font-size:0.9rem;color:#8fa3b8;"
+        f"text-align:center;margin:0.4rem 0 0.75rem;'>"
+        f"{_tier['label']} tier · {_size} trucks × ${_tier['per_truck']:.0f} = "
+        f"<strong style='color:#e8edf2;'>${_total:,.2f}/mo</strong> after trial"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
 
     if st.button(
-        f"Start Free Trial — {chosen_plan.title()} (${chosen_price:.2f}/mo) →",
+        f"Start Free Trial — ${_total:,.2f}/mo after 14 days →",
         type="primary",
         use_container_width=True,
     ):
         with st.spinner("Opening secure checkout…"):
-            url, err = create_checkout_url(email, plan=chosen_plan)
+            url, err = create_checkout_url(email, fleet_size=int(_size))
         if err:
             st.error(f"Checkout error: {err}")
         elif url:
