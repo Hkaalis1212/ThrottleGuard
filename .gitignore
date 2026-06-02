@@ -2,6 +2,7 @@
 .env
 reset_admin_password.py
 google_credentials.json
+client_secret*.json
 
 # ── Runtime-generated files — recreated on startup ───────────────────────────
 predictions.db
