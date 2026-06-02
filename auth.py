@@ -22,31 +22,49 @@ def _ensure_db_ready() -> None:
         st.session_state["_auth_db_ready"] = True
 
 
-def _google_env_vars() -> tuple[str, str, str] | None:
-    """Return (client_id, client_secret, redirect_uri) if all three are set, else None."""
+def _write_credentials_to_tmp() -> str | None:
+    """
+    Write Google credentials from env vars to /tmp and return the path.
+    Returns None if any required env var is missing.
+    /tmp is always writable on Railway and never scanned by Railpack.
+    """
+    import json
+    import tempfile
+
     client_id     = os.environ.get("GOOGLE_CLIENT_ID")
     client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
     redirect_uri  = os.environ.get("REDIRECT_URI")
-    if all([client_id, client_secret, redirect_uri]):
-        return client_id, client_secret, redirect_uri
-    return None
+
+    if not all([client_id, client_secret, redirect_uri]):
+        return None
+
+    creds = {
+        "web": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uris": [redirect_uri],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    }
+    path = os.path.join(tempfile.gettempdir(), "tg_google_credentials.json")
+    with open(path, "w") as f:
+        json.dump(creds, f)
+    return path
 
 
-def _google_gate(client_id: str, client_secret: str, redirect_uri: str) -> None:
+def _google_gate(creds_path: str) -> None:
     """
     Run the Google OAuth flow.
     Sets st.session_state['tg_user'] on success, calls st.stop() if not yet authenticated.
-    Credentials are passed directly — no credentials file needed.
     """
     from streamlit_google_auth import Authenticate
 
     authenticator = Authenticate(
-        secret_credentials_path=None,
+        secret_credentials_path=creds_path,
         cookie_name="throttleguard_auth",
         cookie_key=os.environ.get("SESSION_SECRET", "throttleguard"),
-        redirect_uri=redirect_uri,
-        client_id=client_id,
-        client_secret=client_secret,
+        redirect_uri=os.environ.get("REDIRECT_URI"),
     )
 
     authenticator.check_authentification()
@@ -72,9 +90,9 @@ def run_auth_gate() -> None:
 
     Either way, the function returns only when st.session_state['tg_user'] is set.
     """
-    google_vars = _google_env_vars()
-    if google_vars:
-        _google_gate(*google_vars)
+    creds_path = _write_credentials_to_tmp()
+    if creds_path:
+        _google_gate(creds_path)
 
     # Always run the DB init and password-auth fallback so that:
     # - the tg_users table exists (needed even for Google users)
