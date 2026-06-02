@@ -8,4 +8,4 @@ requests
 APScheduler
 twilio
 flask
-streamlit-google-auth==1.1.8
+streamlit-oauth
