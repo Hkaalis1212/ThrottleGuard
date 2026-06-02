@@ -22,34 +22,28 @@ def _ensure_db_ready() -> None:
         st.session_state["_auth_db_ready"] = True
 
 
-def _write_credentials_file() -> None:
-    """
-    Build google_credentials.json at runtime from env vars so Railway only
-    needs GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in its Variables panel.
-    Skips if the file already exists with a real secret (local dev workflow).
-    """
+def _write_google_credentials() -> bool:
+    """Write google_credentials.json from Railway env vars at startup."""
+    client_id     = os.environ.get("GOOGLE_CLIENT_ID")
+    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
+    redirect_uri  = os.environ.get("REDIRECT_URI")
+
+    if not all([client_id, client_secret, redirect_uri]):
+        return False  # env vars not set, skip Google auth
+
     import json
-
-    creds_path = "google_credentials.json"
-
-    client_id     = os.environ.get("GOOGLE_CLIENT_ID", "")
-    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
-    redirect_uri  = os.environ.get("REDIRECT_URI", "")
-
-    # Only overwrite if we have real env var values — avoids clobbering a
-    # locally-edited file that already has the secret filled in.
-    if client_id and client_secret:
-        payload = {
-            "web": {
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "redirect_uris": [redirect_uri],
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-            }
+    creds = {
+        "web": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uris": [redirect_uri],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
         }
-        with open(creds_path, "w") as f:
-            json.dump(payload, f)
+    }
+    with open("google_credentials.json", "w") as f:
+        json.dump(creds, f)
+    return True
 
 
 def _google_gate() -> None:
@@ -59,7 +53,7 @@ def _google_gate() -> None:
     """
     from streamlit_google_auth import Authenticate
 
-    _write_credentials_file()
+    _write_google_credentials()
 
     authenticator = Authenticate(
         secret_credentials_path="google_credentials.json",
@@ -91,7 +85,7 @@ def run_auth_gate() -> None:
 
     Either way, the function returns only when st.session_state['tg_user'] is set.
     """
-    if os.environ.get("GOOGLE_CLIENT_ID"):
+    if _write_google_credentials():
         _google_gate()
 
     # Always run the DB init and password-auth fallback so that:
