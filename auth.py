@@ -22,16 +22,22 @@ def _ensure_db_ready() -> None:
         st.session_state["_auth_db_ready"] = True
 
 
-def _write_google_credentials() -> bool:
-    """Write google_credentials.json from Railway env vars at startup."""
+def _write_google_credentials() -> str | None:
+    """
+    Write credentials to /tmp so Railway's project-directory scanner never
+    sees a missing file reference. Returns the file path on success, None if
+    env vars are not set.
+    """
+    import json
+    import tempfile
+
     client_id     = os.environ.get("GOOGLE_CLIENT_ID")
     client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
     redirect_uri  = os.environ.get("REDIRECT_URI")
 
     if not all([client_id, client_secret, redirect_uri]):
-        return False  # env vars not set, skip Google auth
+        return None  # env vars not set, skip Google auth
 
-    import json
     creds = {
         "web": {
             "client_id": client_id,
@@ -41,22 +47,21 @@ def _write_google_credentials() -> bool:
             "token_uri": "https://oauth2.googleapis.com/token",
         }
     }
-    with open("google_credentials.json", "w") as f:
+    creds_path = os.path.join(tempfile.gettempdir(), "google_credentials.json")
+    with open(creds_path, "w") as f:
         json.dump(creds, f)
-    return True
+    return creds_path
 
 
-def _google_gate() -> None:
+def _google_gate(creds_path: str) -> None:
     """
     Run the Google OAuth flow.
     Sets st.session_state['tg_user'] on success, calls st.stop() if not yet authenticated.
     """
     from streamlit_google_auth import Authenticate
 
-    _write_google_credentials()
-
     authenticator = Authenticate(
-        secret_credentials_path="google_credentials.json",
+        secret_credentials_path=creds_path,
         cookie_name="throttleguard_auth",
         cookie_key=os.environ.get("SESSION_SECRET", "throttleguard"),
         redirect_uri=os.environ.get("REDIRECT_URI"),
@@ -85,8 +90,9 @@ def run_auth_gate() -> None:
 
     Either way, the function returns only when st.session_state['tg_user'] is set.
     """
-    if _write_google_credentials():
-        _google_gate()
+    creds_path = _write_google_credentials()
+    if creds_path:
+        _google_gate(creds_path)
 
     # Always run the DB init and password-auth fallback so that:
     # - the tg_users table exists (needed even for Google users)
