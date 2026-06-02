@@ -49,7 +49,7 @@ def _google_gate() -> None:
         redirect_uri=redirect_uri,
         scope="openid email profile",
         key="google_oauth",
-        use_pkce=True,
+        pkce="S256",
         extras_params={"prompt": "select_account"},
     )
 
