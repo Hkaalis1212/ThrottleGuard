@@ -1,9 +1,10 @@
 """
 auth.py — ThrottleGuard authentication gate
 
-Manual OAuth 2.0 + PKCE flow using requests + authlib.
-No st.login() — avoids Streamlit's /oauth2/callback path routing which
-breaks static asset resolution behind Railway's proxy.
+Manual OAuth 2.0 + PKCE flow using requests.
+The PKCE verifier is encoded into the state parameter (HMAC-signed) so it
+survives the full-page redirect to Google and back — Streamlit session state
+does not persist across page redirects, so we cannot store state there.
 
 Redirect URI must be the app root (e.g. https://your-app.railway.app).
 Google appends ?code=...&state=... to it; we detect that in st.query_params.
@@ -13,10 +14,13 @@ Usage (top of app.py):
     run_auth_gate()
 """
 
-import hashlib
 import base64
+import hashlib
+import hmac
+import json
 import os
 import secrets
+from urllib.parse import urlencode
 
 import requests
 import streamlit as st
@@ -34,6 +38,8 @@ def _ensure_db_ready() -> None:
         st.session_state["_auth_db_ready"] = True
 
 
+# ── PKCE helpers ──────────────────────────────────────────────────────────────
+
 def _pkce_pair() -> tuple[str, str]:
     verifier  = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(
@@ -42,8 +48,40 @@ def _pkce_pair() -> tuple[str, str]:
     return verifier, challenge
 
 
-def _auth_url(client_id: str, redirect_uri: str, state: str, challenge: str) -> str:
-    from urllib.parse import urlencode
+# ── Signed state token — stateless CSRF protection ───────────────────────────
+# We encode the PKCE verifier into the OAuth state parameter and sign it with
+# SESSION_SECRET. Google returns the state unchanged, so we can decode the
+# verifier from it on the callback without any server-side session storage.
+
+def _secret() -> bytes:
+    return os.environ.get("SESSION_SECRET", "throttleguard-default").encode()
+
+
+def _encode_state(verifier: str) -> str:
+    payload = json.dumps({"v": verifier}).encode()
+    sig     = hmac.new(_secret(), payload, hashlib.sha256).hexdigest()
+    raw     = json.dumps({"p": payload.decode(), "s": sig})
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+def _decode_state(state: str) -> str | None:
+    """Return the PKCE verifier from a signed state token, or None if invalid."""
+    try:
+        padded  = state + "=" * (-len(state) % 4)
+        raw     = json.loads(base64.urlsafe_b64decode(padded).decode())
+        payload = raw["p"].encode()
+        expected = hmac.new(_secret(), payload, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, raw["s"]):
+            return None
+        return json.loads(payload)["v"]
+    except Exception:
+        return None
+
+
+# ── OAuth flow ────────────────────────────────────────────────────────────────
+
+def _build_auth_url(client_id: str, redirect_uri: str,
+                    state: str, challenge: str) -> str:
     params = {
         "client_id":             client_id,
         "redirect_uri":          redirect_uri,
@@ -72,12 +110,6 @@ def _exchange_code(code: str, verifier: str, client_id: str,
 
 
 def _google_gate() -> None:
-    """
-    Run the Google OAuth flow.
-    - If ?code= is in the URL: finish the exchange and set tg_user.
-    - Otherwise: start the flow by redirecting to Google.
-    Returns without setting tg_user only if Google env vars are not set.
-    """
     client_id     = os.environ.get("GOOGLE_CLIENT_ID")
     client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
     redirect_uri  = os.environ.get("REDIRECT_URI", "")
@@ -87,19 +119,16 @@ def _google_gate() -> None:
 
     params = st.query_params
 
-    # ── Callback: Google redirected back with ?code= ──────────────────────────
+    # ── Callback: Google returned ?code=... ───────────────────────────────────
     if "code" in params:
-        code  = params["code"]
-        state = params.get("state", "")
+        code     = params["code"]
+        state    = params.get("state", "")
+        verifier = _decode_state(state)
 
-        if state != st.session_state.get("_oauth_state"):
-            st.error("OAuth state mismatch — possible CSRF. Please sign in again.")
-            for k in ("_oauth_state", "_oauth_verifier"):
-                st.session_state.pop(k, None)
+        if verifier is None:
+            st.error("Invalid OAuth state. Please sign in again.")
             st.query_params.clear()
             st.stop()
-
-        verifier = st.session_state.get("_oauth_verifier", "")
 
         try:
             token = _exchange_code(code, verifier, client_id, client_secret, redirect_uri)
@@ -114,28 +143,22 @@ def _google_gate() -> None:
         ).json()
 
         email = userinfo.get("email", "")
-        print(f"[auth] Google callback — email={email}")
+        print(f"[auth] Google sign-in: {email}")
 
         if email:
             _ensure_db_ready()
             st.session_state["tg_user"] = get_or_create_google_user(email)
-            for k in ("_oauth_state", "_oauth_verifier"):
-                st.session_state.pop(k, None)
             st.query_params.clear()
             st.rerun()
         else:
             st.error("Could not retrieve your Google email. Please try again.")
             st.stop()
 
-    # ── No code yet: start the OAuth flow ────────────────────────────────────
+    # ── No code: start the OAuth flow ─────────────────────────────────────────
     else:
-        state    = secrets.token_urlsafe(16)
         verifier, challenge = _pkce_pair()
-        st.session_state["_oauth_state"]    = state
-        st.session_state["_oauth_verifier"] = verifier
-
-        url = _auth_url(client_id, redirect_uri, state, challenge)
-        # Redirect the browser to Google
+        state = _encode_state(verifier)
+        url   = _build_auth_url(client_id, redirect_uri, state, challenge)
         st.markdown(f'<meta http-equiv="refresh" content="0; url={url}">',
                     unsafe_allow_html=True)
         st.stop()
@@ -158,5 +181,5 @@ def run_auth_gate() -> None:
 
 def clear_auth_session() -> None:
     """Clear auth state on sign-out. Caller should call st.rerun() after."""
-    for key in ["tg_user", "_auth_db_ready", "_oauth_state", "_oauth_verifier"]:
+    for key in ["tg_user", "_auth_db_ready"]:
         st.session_state.pop(key, None)
