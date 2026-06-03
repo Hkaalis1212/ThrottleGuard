@@ -154,7 +154,7 @@ def _google_gate() -> None:
             st.error("Could not retrieve your Google email. Please try again.")
             st.stop()
 
-    # ── No code: start the OAuth flow ─────────────────────────────────────────
+    # ── No code: show sign-in page with Google button ─────────────────────────
     else:
         # Force https — Google rejects http redirect_uris for non-localhost
         if redirect_uri.startswith("http://") and "localhost" not in redirect_uri:
@@ -165,10 +165,8 @@ def _google_gate() -> None:
         url   = _build_auth_url(client_id, redirect_uri, state, challenge)
 
         print(f"[auth] redirect_uri = {redirect_uri}")
-        print(f"[auth] full auth_url = {url}")
 
-        st.markdown(f'<meta http-equiv="refresh" content="0; url={url}">',
-                    unsafe_allow_html=True)
+        login_page(google_url=url)
         st.stop()
 
 

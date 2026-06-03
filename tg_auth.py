@@ -323,9 +323,10 @@ def get_or_create_google_user(email: str) -> dict:
 
 # ── Streamlit login page ──────────────────────────────────────────────────────
 
-def login_page() -> None:
+def login_page(google_url: str | None = None) -> None:
     """
     Renders the ThrottleGuard login page.
+    If google_url is provided, shows a Sign in with Google button at the top.
     Sets st.session_state.tg_user on successful login and reruns.
     """
     st.set_page_config(
@@ -374,6 +375,27 @@ def login_page() -> None:
         )
 
     with col_right:
+        if google_url:
+            st.markdown(
+                f"""
+                <a href="{google_url}" style="
+                    display:block;text-align:center;text-decoration:none;
+                    background:#ffffff;color:#3c4043;
+                    border:1px solid #dadce0;border-radius:4px;
+                    padding:0.6rem 1rem;margin-bottom:1rem;
+                    font-family:'Barlow',sans-serif;font-size:0.95rem;font-weight:500;
+                ">
+                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+                         style="height:18px;vertical-align:middle;margin-right:8px;">
+                    Sign in with Google
+                </a>
+                <div style="text-align:center;color:#555;font-size:0.8rem;margin-bottom:0.75rem;">
+                    — or sign in with username —
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
         tab_signin, tab_create, tab_reset = st.tabs(["Sign In", "Create Account", "Reset Password"])
 
         with tab_signin:
