@@ -165,7 +165,7 @@ def _google_gate() -> None:
         url   = _build_auth_url(client_id, redirect_uri, state, challenge)
 
         print(f"[auth] redirect_uri = {redirect_uri}")
-        print(f"[auth] auth_url (first 120 chars) = {url[:120]}")
+        print(f"[auth] full auth_url = {url}")
 
         st.markdown(f'<meta http-equiv="refresh" content="0; url={url}">',
                     unsafe_allow_html=True)
