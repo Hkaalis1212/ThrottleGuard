@@ -110,9 +110,9 @@ def _exchange_code(code: str, verifier: str, client_id: str,
 
 
 def _google_gate() -> None:
-    client_id     = os.environ.get("GOOGLE_CLIENT_ID")
-    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
-    redirect_uri  = os.environ.get("REDIRECT_URI", "")
+    client_id     = (os.environ.get("GOOGLE_CLIENT_ID") or "").strip()
+    client_secret = (os.environ.get("GOOGLE_CLIENT_SECRET") or "").strip()
+    redirect_uri  = (os.environ.get("REDIRECT_URI") or "").strip()
 
     if not all([client_id, client_secret, redirect_uri]):
         return  # Google not configured — fall through to password login
