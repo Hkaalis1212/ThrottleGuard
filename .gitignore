@@ -1,6 +1,7 @@
 # ── Secrets — NEVER commit ────────────────────────────────────────────────────
 .env
 reset_admin_password.py
+.streamlit/secrets.toml
 client_secret*.json
 
 # ── Runtime-generated files — recreated on startup ───────────────────────────

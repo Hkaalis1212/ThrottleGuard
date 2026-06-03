@@ -8,4 +8,3 @@ requests
 APScheduler
 twilio
 flask
-streamlit-oauth
