@@ -156,9 +156,17 @@ def _google_gate() -> None:
 
     # ── No code: start the OAuth flow ─────────────────────────────────────────
     else:
+        # Force https — Google rejects http redirect_uris for non-localhost
+        if redirect_uri.startswith("http://") and "localhost" not in redirect_uri:
+            redirect_uri = redirect_uri.replace("http://", "https://", 1)
+
         verifier, challenge = _pkce_pair()
         state = _encode_state(verifier)
         url   = _build_auth_url(client_id, redirect_uri, state, challenge)
+
+        print(f"[auth] redirect_uri = {redirect_uri}")
+        print(f"[auth] auth_url (first 120 chars) = {url[:120]}")
+
         st.markdown(f'<meta http-equiv="refresh" content="0; url={url}">',
                     unsafe_allow_html=True)
         st.stop()
