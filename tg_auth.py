@@ -270,35 +270,53 @@ def can_do(action: str) -> bool:
     return action in ROLE_PERMISSIONS.get(role, set())
 
 
+def _admin_emails() -> set[str]:
+    """Return the set of emails that always get Admin role (from TG_ADMIN_EMAILS env var)."""
+    raw = os.environ.get("TG_ADMIN_EMAILS", "")
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
 def get_or_create_google_user(email: str) -> dict:
     """
     Look up a user by Google email (stored as username).
-    Auto-creates a Viewer account on first Google sign-in so admins
-    can promote them later in the User Management panel.
+    - Emails in TG_ADMIN_EMAILS always get Admin role (upgrades existing records too).
+    - New emails are auto-created as Viewer; Admin can promote them in User Management.
     """
     email = email.strip().lower()
+    role  = "Admin" if email in _admin_emails() else None  # None = keep existing or default Viewer
+
     conn = get_conn()
     try:
         with conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cur.execute("SELECT username, role FROM tg_users WHERE username = %s", (email,))
             row = cur.fetchone()
+
             if row:
+                assigned_role = role or row["role"]
+                if assigned_role != row["role"]:
+                    cur.execute(
+                        "UPDATE tg_users SET role = %s WHERE username = %s",
+                        (assigned_role, email),
+                    )
+                    print(f"[ThrottleGuard Auth] Upgraded {email} → {assigned_role}")
                 cur.execute(
                     "UPDATE tg_users SET last_login = %s WHERE username = %s",
                     (datetime.utcnow().isoformat(), email),
                 )
-                return {"username": row["username"], "role": row["role"]}
-            # First Google sign-in — create Viewer account with a random unusable password
+                return {"username": email, "role": assigned_role}
+
+            # First Google sign-in — create account with a random unusable password
+            assigned_role = role or "Viewer"
             salt    = secrets.token_hex(16)
             pw_hash = _hash_password(secrets.token_hex(32), salt)
             cur.execute(
                 "INSERT INTO tg_users (username, password_hash, salt, role, created_at) "
                 "VALUES (%s, %s, %s, %s, %s)",
-                (email, pw_hash, salt, "Viewer", datetime.utcnow().isoformat()),
+                (email, pw_hash, salt, assigned_role, datetime.utcnow().isoformat()),
             )
-            print(f"[ThrottleGuard Auth] Auto-created Viewer account for Google user: {email}")
-            return {"username": email, "role": "Viewer"}
+            print(f"[ThrottleGuard Auth] Auto-created {assigned_role} account for Google user: {email}")
+            return {"username": email, "role": assigned_role}
     finally:
         conn.close()
 
