@@ -34,6 +34,12 @@ def run_auth_gate() -> None:
     Returns only when the user is authenticated and tg_user is set in session state.
     """
     if _google_configured():
+        try:
+            print(f"[auth] st.user.is_logged_in = {st.user.is_logged_in}")
+            print(f"[auth] st.user = {dict(st.user)}")
+        except Exception as _e:
+            print(f"[auth] st.user read error: {_e}")
+
         if not st.user.is_logged_in:
             st.login("google")
             st.stop()
