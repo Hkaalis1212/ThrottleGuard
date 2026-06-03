@@ -1,4 +1,5 @@
 streamlit
+authlib>=1.3.2
 pandas
 plotly
 python-dotenv
