@@ -38,6 +38,9 @@ from throttleguard_engine_thresholds import (
     DEF_QUALITY_MIN_PCT,
     DEF_QUALITY_MAX_PCT,
     DEF_QUALITY_CRITICAL_PCT,
+    DPF_SENSOR_DELTA_TEMP_FLOOR_F,
+    DPF_SENSOR_DELTA_MAX_SPREAD_F,
+    SCR_DPF_OUTLET_MAX_SPREAD_F,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -307,14 +310,19 @@ def calculate_expert_score(row: dict[str, Any]) -> dict[str, Any]:
             f"DPF peak temp {peak_temp:.0f}degF exceeds 1190degF limit -thermal damage risk"
         )
 
-    # Rule 3 -Impossible temp delta → sensor fault or DPF breach
-    # GATED: delta check only valid when regen is active and temps should be elevated
-    if regen_active and outlet_regen < 500 and inlet_temp > 1000:
+    # Rule 3 -Sensor delta fault → inlet/outlet spread too wide at high temp
+    # GATED: spread check only activates once either sensor reaches the floor.
+    # Below that floor a wide spread is normal (cold start, early regen ramp).
+    if (
+        regen_active
+        and (outlet_regen >= DPF_SENSOR_DELTA_TEMP_FLOOR_F or inlet_temp >= DPF_SENSOR_DELTA_TEMP_FLOOR_F)
+        and abs(inlet_temp - outlet_regen) > DPF_SENSOR_DELTA_MAX_SPREAD_F
+    ):
         score += 70
         failure_modes.append("SENSOR_FAULT")
         reasons.append(
             f"Temp delta anomaly: inlet {inlet_temp:.0f}degF / outlet {outlet_regen:.0f}degF -"
-            "sensor fault or DPF breach"
+            f"spread exceeds {DPF_SENSOR_DELTA_MAX_SPREAD_F}degF at high temp -sensor fault or DPF breach"
         )
 
     # ── HIGH RULES ────────────────────────────────────────────────────────────
@@ -475,6 +483,21 @@ def calculate_expert_score(row: dict[str, Any]) -> dict[str, Any]:
         note = "Detroit 1-Box: shared housing — both systems compromised." if family in ONE_BOX_FAMILIES else ""
         reasons.append(
             f"Compound failure: DPF and SCR both flagged — full aftertreatment system affected. {note}".strip()
+        )
+
+    # Rule 17 — SCR inlet vs. DPF outlet consistency check
+    # SCR sits immediately downstream of the DPF — inlet temp should track
+    # close to DPF outlet during active regen. Wide spread = sensor fault.
+    if (
+        regen_active
+        and scr_inlet is not None
+        and abs(float(scr_inlet) - outlet_regen) > SCR_DPF_OUTLET_MAX_SPREAD_F
+    ):
+        score += 15
+        failure_modes.append("SCR_CATALYST")
+        reasons.append(
+            f"SCR inlet {float(scr_inlet):.0f}degF / DPF outlet {outlet_regen:.0f}degF -"
+            f"spread exceeds {SCR_DPF_OUTLET_MAX_SPREAD_F}degF -possible temp sensor fault"
         )
 
     # ── 5. Finalise score and priority ────────────────────────────────────────

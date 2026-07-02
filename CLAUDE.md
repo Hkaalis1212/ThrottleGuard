@@ -14,7 +14,7 @@ Code must be practical, well-commented, and explainable to someone who knows tru
 ## Scoring Engine
 **NOT XGBoost. NOT ML.** ThrottleGuard v2 uses a rule-based expert system.
 
-- **16 rules** covering the full aftertreatment system (DPF + SCR)
+- **17 rules** covering the full aftertreatment system (DPF + SCR)
 - **3 engine families** with different thresholds: DETROIT, VOLVO_MACK, CUMMINS_PACCAR
 - Score 0–100 → priority: CRITICAL (≥60) / HIGH (≥35) / MEDIUM (≥15) / LOW (<15)
 - Every flag shows the exact rule that fired and a plain-English action
@@ -23,9 +23,9 @@ Code must be practical, well-commented, and explainable to someone who knows tru
 ### Rule summary
 | # | System | Trigger | Pts |
 |---|---|---|---|
-| 1 | DPF | Outlet temp <940°F during regen — clogging | 60 |
+| 1 | DPF | Outlet temp <960°F during regen — clogging | 60 |
 | 2 | DPF | Peak temp above family limit — thermal shock | 50 |
-| 3 | DPF | Sensor delta fault (outlet <500°F AND inlet >1000°F) | 70 |
+| 3 | DPF | Sensor delta fault (inlet/outlet spread >100°F once either reaches 950°F) | 70 |
 | 4 | DPF | Regen count >2 in 7 days OR driver reports frequent regen | 30 |
 | 5 | DPF | Mileage >300k since cleaning AND oil consumption >0.5 qt/1000mi | 25 |
 | 6 | DPF | Turbo boost <20 PSI OR EGR flow fault | 25 |
@@ -40,6 +40,7 @@ Code must be practical, well-commented, and explainable to someone who knows tru
 | 14 | SCR | DEF concentration moderately wrong (outside 31–34%) | 10 |
 | 15 | SCR | NH3 slip detected | 10 |
 | 16 | BOTH | Compound DPF+SCR failure (+20 Detroit 1-Box, +15 others) | 15–20 |
+| 17 | BOTH | SCR inlet vs. DPF outlet spread >50°F — sensor fault | 15 |
 
 ## CSV Input Columns
 
@@ -58,7 +59,7 @@ nox_conversion_pct, scr_inlet_temp_f, def_concentration_pct,
 nh3_slip_detected, regen_active
 
 ## Engine Thresholds (throttleguard_engine_thresholds.py)
-- REGEN_OUTLET_CRITICAL_F = 940 (outlet temp below this during regen = clogging)
+- REGEN_OUTLET_CRITICAL_F = 960 (outlet temp below this during regen = clogging; revised 2026-07-02 from 940)
 - DIFF_PRESSURE_CRITICAL_PSI = 4.0 (backpressure limit, in.H2O)
 - REGEN_HIGH_CRITICAL_F: DETROIT=1250, VOLVO_MACK=1250, CUMMINS_PACCAR=1200
 - NOX_CONVERSION_CRITICAL_PCT = 50, NOX_CONVERSION_WARNING_PCT = 70
@@ -66,6 +67,8 @@ nh3_slip_detected, regen_active
 - DEF_QUALITY_SPEC_PCT = 32.5, DEF_QUALITY_MIN_PCT = 31.0, DEF_QUALITY_MAX_PCT = 34.0
 - DEF_QUALITY_CRITICAL_PCT = 20.0
 - ONE_BOX_FAMILIES = {"DETROIT"} — DPF and SCR share single housing
+- DPF_SENSOR_DELTA_TEMP_FLOOR_F = 950, DPF_SENSOR_DELTA_MAX_SPREAD_F = 100 (Rule 3, added 2026-07-02)
+- SCR_DPF_OUTLET_MAX_SPREAD_F = 50 (Rule 17, added 2026-07-02)
 
 ## Domain Rules (20 years field experience)
 - High backpressure can exist with low soot — ash buildup, not just soot clogging
@@ -83,7 +86,7 @@ nh3_slip_detected, regen_active
 - **Database**: Supabase PostgreSQL via psycopg2 (DATABASE_URL env var)
 - **Auth**: tg_auth.py — SHA-256 + per-user salt, roles: Admin / Technician / Viewer
 - **Subscriptions**: tg_subscription.py — Stripe PaymentIntent, psycopg2 backend
-- **Hosting**: Railway (railway.toml configured)
+- **Hosting**: Railway — two services in one project: Streamlit (railway.toml) + FastAPI ingestion API (api.py, separate Railway service, start command: `uvicorn api:app --host 0.0.0.0 --port $PORT`)
 - **GitHub**: Hkaalis1212
 
 ## Database Tables (all prefixed tg_ to avoid collision with Fleet Optimizer)
@@ -91,6 +94,7 @@ nh3_slip_detected, regen_active
 - tg_predictions — prediction history + outcome tracking (created by outcome_db.py)
 - tg_subscriptions — fleet subscription status (created by tg_subscription.py)
 - tg_payment_history — Stripe payment records (created by tg_subscription.py)
+- tg_motive_tokens — Motive OAuth token persistence (created by tg_motive_auth.py); survives Railway restarts
 
 All tables auto-created on first launch. No migrations needed.
 
@@ -99,6 +103,11 @@ All tables auto-created on first launch. No migrations needed.
 ThrottleGuard/
 ├── CLAUDE.md
 ├── app.py                          ← Streamlit dashboard + auth/subscription gates
+├── api.py                          ← FastAPI ingestion layer — Motive OAuth + webhooks
+│                                     (separate Railway service; start: uvicorn api:app)
+├── tg_telematics_adapters.py       ← Provider-agnostic normalization: SPN → canonical row
+│                                     Motive adapter lives here; add Samsara/Geotab adapters here too
+├── tg_motive_auth.py               ← Supabase-backed Motive token storage (tg_motive_tokens table)
 ├── dpf_expert_system.py            ← Scoring engine for Dashboard tab
 ├── scoring_engine.py               ← Scoring engine for Fleet Scores tab
 ├── throttleguard_engine_thresholds.py ← All numeric thresholds (single source of truth)
@@ -113,24 +122,38 @@ ThrottleGuard/
 ├── .env                            ← Local secrets (never commit)
 ├── .env.example                    ← Documents all env vars
 ├── .gitignore
-├── railway.toml                    ← Railway deploy config
+├── railway.toml                    ← Railway deploy config (Streamlit service only)
 └── requirements.txt
 ```
 
+## Telematics Ingestion Architecture
+api.py is the first adapter in a provider-agnostic ingestion layer.
+- tg_telematics_adapters.py owns the SPN → canonical-field mapping (shared J1939 domain knowledge)
+- Each provider gets normalize_<provider>_<event>() functions in that module
+- api.py routes webhook events to the right normalizer; output is always the canonical row shape
+- Adding Samsara or Geotab webhooks = new adapter functions in tg_telematics_adapters.py + new routes in api.py
+
+**Known SPN label conflict to resolve:** SPN 3226 is labeled "NOx Sensor upstream" in tg_telematics_adapters.py
+(matches SAE J1939 spec) but "Aftertreatment Outlet Temperature" in throttleguard_samsara_poller.py — one of these is wrong. Verify against real payloads before wiring NOx conversion scoring from either source.
+
 ## Dead Code (do not restore)
-- api.py — v1 FastAPI server (XGBoost-based, incompatible schema, removed)
 - data_processing.py — v1 feature preprocessing (XGBoost pipeline, removed)
 - train_model.py — v1 model training (XGBoost, removed)
 
 ## Environment Variables
-| Variable | Required | Description |
-|---|---|---|
-| DATABASE_URL | Yes | Supabase PostgreSQL connection string |
-| TG_ADMIN_PASSWORD | Yes | Default admin password (set before first deploy) |
-| STRIPE_SECRET_KEY | Yes | Stripe secret key (sk_test_... or sk_live_...) |
-| STRIPE_PUBLISHABLE_KEY | Yes | Stripe publishable key |
-| THROTTLEGUARD_API_URL | No | Enables Fleet Optimizer integration (optional) |
-| THROTTLEGUARD_API_KEY | No | API key for Fleet Optimizer requests |
+| Variable | Required | Service | Description |
+|---|---|---|---|
+| DATABASE_URL | Yes | Both | Supabase PostgreSQL connection string |
+| TG_ADMIN_PASSWORD | Yes | Streamlit | Default admin password (set before first deploy) |
+| STRIPE_SECRET_KEY | Yes | Streamlit | Stripe secret key (sk_test_... or sk_live_...) |
+| STRIPE_PUBLISHABLE_KEY | Yes | Streamlit | Stripe publishable key |
+| MOTIVE_CLIENT_ID | Yes | API | From Motive developer portal |
+| MOTIVE_CLIENT_SECRET | Yes | API | From Motive developer portal |
+| MOTIVE_REDIRECT_URI | Yes | API | https://\<api-service-domain\>.up.railway.app/callback |
+| MOTIVE_WEBHOOK_SECRET | Recommended | API | From Motive portal → Webhooks → your endpoint; enables HMAC signature verification |
+| MOTIVE_SCOPES | No | API | Space-separated OAuth scopes (default: `vehicles.read hours_of_service.read`) |
+| THROTTLEGUARD_API_URL | No | Streamlit | Enables Fleet Optimizer integration (optional) |
+| THROTTLEGUARD_API_KEY | No | Streamlit | API key for Fleet Optimizer requests |
 
 ## Roles & Permissions
 | Role | upload | view | outcomes | manage_users | history |

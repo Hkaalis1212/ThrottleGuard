@@ -152,7 +152,8 @@ REGEN_TRANSITION_FLOOR_F = 930
 
 # Active regen CRITICAL trigger — outlet temp below this during regen = CRITICAL flag
 # Field-validated: 2026-03-23 — founder revised from 930 to 940°F
-REGEN_OUTLET_CRITICAL_F = 940
+# Field-validated: 2026-07-02 — founder revised from 940 to 960°F
+REGEN_OUTLET_CRITICAL_F = 960
 
 # High-side WARNING threshold (°F) — lower bound of observed field range
 # Elevated concern: monitor closely, consider pulling if temp is sustained
@@ -198,6 +199,29 @@ INCOMPLETE_REGEN_STREAK_THRESHOLD = 2
 # Backpressure thresholds (PSI)
 DIFF_PRESSURE_WARNING_PSI  = 2.0   # approaching blockage — watch
 DIFF_PRESSURE_CRITICAL_PSI = 4.0   # critical blockage territory
+
+
+# ─────────────────────────────────────────────────────────────────
+# DPF SENSOR DELTA FAULT (inlet vs. outlet spread at high temp)
+# Field-validated: 2026-07-02 — founder revised sensor-fault check
+# ─────────────────────────────────────────────────────────────────
+# Old rule (outlet <500°F AND inlet >1000°F) only caught a gross sensor
+# failure. Replaced with a spread check: once either DPF inlet or outlet
+# reaches this floor, the two sensors should track close together — a
+# wide spread at high temp indicates a sensor fault or DPF breach
+# regardless of which side is high or low.
+DPF_SENSOR_DELTA_TEMP_FLOOR_F = 950   # spread check only activates above this temp
+DPF_SENSOR_DELTA_MAX_SPREAD_F = 100   # inlet/outlet must stay within this many °F of each other
+
+# ─────────────────────────────────────────────────────────────────
+# SCR INLET vs. DPF OUTLET CONSISTENCY CHECK
+# Field-validated: 2026-07-02 — founder-added cross-sensor check
+# ─────────────────────────────────────────────────────────────────
+# SCR sits immediately downstream of the DPF, so SCR inlet temp should
+# track close to DPF outlet temp during active regen. A wide spread
+# indicates a temp sensor fault on either side of the aftertreatment
+# system, independent of the light-off floor check (SCR_INLET_TEMP_MIN_F).
+SCR_DPF_OUTLET_MAX_SPREAD_F = 50   # SCR inlet vs. DPF outlet must stay within this many °F
 
 
 # ─────────────────────────────────────────────────────────────────
