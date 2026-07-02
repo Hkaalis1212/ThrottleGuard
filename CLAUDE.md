@@ -150,7 +150,8 @@ api.py is the first adapter in a provider-agnostic ingestion layer.
 | MOTIVE_CLIENT_ID | Yes | API | From Motive developer portal |
 | MOTIVE_CLIENT_SECRET | Yes | API | From Motive developer portal |
 | MOTIVE_REDIRECT_URI | Yes | API | https://\<api-service-domain\>.up.railway.app/callback |
-| MOTIVE_WEBHOOK_SECRET | Recommended | API | From Motive portal → Webhooks → your endpoint; enables HMAC signature verification |
+| MOTIVE_WEBHOOK_SECRET | Yes | API | From Motive portal → Webhooks → your endpoint; enables HMAC signature verification. `/webhook` returns 503 if unset — no unsigned events are accepted |
+| MOTIVE_SETUP_KEY | Yes | API | Random secret gating `/authorize?key=...`; without it, `/authorize` refuses to run so the Motive integration can't be hijacked by an unauthenticated caller |
 | MOTIVE_SCOPES | No | API | Space-separated OAuth scopes (default: `vehicles.read hours_of_service.read`) |
 | THROTTLEGUARD_API_URL | No | Streamlit | Enables Fleet Optimizer integration (optional) |
 | THROTTLEGUARD_API_KEY | No | Streamlit | API key for Fleet Optimizer requests |

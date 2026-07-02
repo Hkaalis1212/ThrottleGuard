@@ -1,495 +1,453 @@
 """
-api.py — ThrottleGuard DPF Status API
+api.py — ThrottleGuard Telematics Ingestion API
+------------------------------------------------
+FastAPI layer that handles Motive's OAuth flow and real-time webhook events.
+This is the FIRST adapter in an ingestion architecture built to be
+provider-agnostic — see tg_telematics_adapters.py for why.
 
-Exposes a FastAPI server for both internal use (AI Dispatcher / Streamlit)
-and external clients (fleet management software, mobile apps, etc.).
+HOW IT FITS IN
+    Motive pushes fault/engine/vehicle events here via webhook.
+    This server normalizes them into ThrottleGuard's canonical J1939 row shape
+    (same fields the scoring engine and Streamlit dashboard already use).
+    Token persistence lives in Supabase (tg_motive_tokens) so Railway restarts
+    don't force fleet operators to re-authorize.
 
-Authentication:
-  All endpoints except /health require an API key in the X-API-Key header.
-  Set THROTTLEGUARD_API_KEY environment variable to enable key enforcement.
-  If the env var is not set, auth is skipped (useful for local dev).
+RAILWAY DEPLOYMENT
+    Run this as a SEPARATE Railway service in the same project.
+    Start command:  uvicorn api:app --host 0.0.0.0 --port $PORT
+    Health check:   /health
 
-Endpoints:
-  GET  /health                 — Railway health check (no auth required)
-  GET  /api/dpf-status         — All trucks' current DPF risk (used by AI Dispatcher)
-  POST /predict                — Single truck prediction from live sensor readings
-  POST /predict/batch          — Multiple trucks in one request
-  POST /validate               — Validate sensor data before prediction
+    Required env vars (copy from your existing service):
+        DATABASE_URL          — same Supabase connection string
+        MOTIVE_CLIENT_ID      — from Motive developer portal
+        MOTIVE_CLIENT_SECRET  — from Motive developer portal
+        MOTIVE_REDIRECT_URI   — https://<this-service-domain>.up.railway.app/callback
 
-Run:
-  uvicorn api:app --host 0.0.0.0 --port 8001
+ROUTES
+    GET  /health     — Railway health check
+    GET  /authorize  — Start the Motive OAuth flow (redirects to Motive consent screen)
+    GET  /callback   — Motive OAuth redirect (exchanges code for token, stored in Supabase)
+    POST /webhook    — Real-time fault/engine/vehicle events from Motive (HMAC verified)
+    GET  /token      — Internal: confirm token is live without exposing credentials
 """
 
+import hashlib
+import hmac
+import html
+import json
 import os
-import pathlib
-from typing import List, Optional, Dict, Any
+import secrets
+import logging
+import httpx
+from datetime import datetime
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 
-import pandas as pd
-import uvicorn
-from fastapi import FastAPI, HTTPException, Header, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-
-from data_processing import preprocess
-
-# ── App setup ────────────────────────────────────────────────────────────────
-
-app = FastAPI(title="ThrottleGuard DPF API", version="2.0.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
+from tg_motive_auth import save_token, get_token, token_is_expired, refresh_access_token
+from tg_telematics_adapters import (
+    normalize_motive_fault_event,
+    normalize_motive_engine_event,
+    normalize_motive_vehicle_event,
 )
 
-BASE_DIR = pathlib.Path(__file__).parent
+# ── Logging ────────────────────────────────────────────────────────────────────
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger(__name__)
 
-# ── Risk thresholds (matches ThrottleGuard spec exactly) ─────────────────────
-# CRITICAL <= 3 days, HIGH <= 7, MEDIUM <= 21, LOW > 21
+# ── App ────────────────────────────────────────────────────────────────────────
+app = FastAPI(title="ThrottleGuard Ingestion API", version="2.0.0")
 
-RISK_THRESHOLDS = {"CRITICAL": 3, "HIGH": 7, "MEDIUM": 21}
+# ── Motive OAuth config (Railway env vars) ─────────────────────────────────────
+MOTIVE_CLIENT_ID      = os.environ.get("MOTIVE_CLIENT_ID")
+MOTIVE_CLIENT_SECRET  = os.environ.get("MOTIVE_CLIENT_SECRET")
+MOTIVE_REDIRECT_URI   = os.environ.get("MOTIVE_REDIRECT_URI")
+MOTIVE_WEBHOOK_SECRET = os.environ.get("MOTIVE_WEBHOOK_SECRET", "")
+# Gates /authorize — without this, anyone who finds the URL could connect their
+# own Motive account and overwrite the fleet's stored token (save_token() only
+# keeps one row per provider). Generate with:
+#   python -c "import secrets; print(secrets.token_urlsafe(32))"
+MOTIVE_SETUP_KEY      = os.environ.get("MOTIVE_SETUP_KEY", "")
+MOTIVE_AUTH_URL       = "https://api.gomotive.com/oauth/authorize"
+MOTIVE_TOKEN_URL      = "https://api.gomotive.com/oauth/token"
+# Scopes your Motive app was approved for — adjust in the developer portal if needed
+MOTIVE_SCOPES         = os.environ.get("MOTIVE_SCOPES", "vehicles.read hours_of_service.read")
 
-# Risk weights for scoring — higher = more urgent
-RISK_WEIGHTS = {"CRITICAL": 10, "HIGH": 5, "MEDIUM": 2, "LOW": 1}
+PROVIDER = "motive"
 
-# ── J1939 feature set — all 24 required inputs ───────────────────────────────
-# These are the exact features the model was trained on.
-# Any incoming data missing these will be flagged by /validate.
-
-J1939_FEATURES = [
-    "soot_load_pct", "diff_pressure_psi", "peak_regen_temp_f",
-    "regen_completion_rate", "incomplete_regen_streak", "regens_last_7_days",
-    "nox_ppm", "pm_level_mg", "egt_pre_turbo_f", "egt_post_turbo_f",
-    "egt_pre_dpf_f", "egt_post_dpf_f", "egt_dpf_delta_f", "def_level_pct",
-    "idle_hours_24h", "idle_pct", "engine_load_pct", "engine_hours_total",
-    "miles_on_dpf", "engine_age_years", "ambient_temp_f", "baro_pressure_kpa",
-    "coolant_temp_f", "fuel_quality_score",
-]
-
-# Valid sensor ranges for validation — based on 20 years field experience
-# Values outside these ranges are flagged as WARN or FAIL
-SENSOR_RANGES = {
-    "soot_load_pct":          (0, 100),
-    "diff_pressure_psi":      (0, 15),
-    "peak_regen_temp_f":      (800, 1350),
-    "regen_completion_rate":  (0, 1.0),
-    "incomplete_regen_streak":(0, 20),
-    "regens_last_7_days":     (0, 30),
-    "nox_ppm":                (0, 2000),
-    "pm_level_mg":            (0, 100),
-    "egt_pre_turbo_f":        (300, 1400),
-    "egt_post_turbo_f":       (300, 1400),
-    "egt_pre_dpf_f":          (300, 1400),
-    "egt_post_dpf_f":         (300, 1400),
-    "egt_dpf_delta_f":        (0, 400),
-    "def_level_pct":          (0, 100),
-    "idle_hours_24h":         (0, 24),
-    "idle_pct":               (0, 100),
-    "engine_load_pct":        (0, 100),
-    "engine_hours_total":     (0, 1_000_000),
-    "miles_on_dpf":           (0, 500_000),
-    "engine_age_years":       (0, 30),
-    "ambient_temp_f":         (-40, 130),
-    "baro_pressure_kpa":      (80, 110),
-    "coolant_temp_f":         (150, 250),
-    "fuel_quality_score":     (0, 1.0),
-}
-
-# ── API Key authentication ────────────────────────────────────────────────────
-# Set THROTTLEGUARD_API_KEY in Railway environment variables.
-# External clients must send: X-Api-Key: <your-key>
-# If env var is not set, auth is disabled (local dev mode).
-
-API_KEY = os.getenv("THROTTLEGUARD_API_KEY")
+# CSRF protection: track in-flight OAuth state values (single-process; fine for one Railway instance)
+_pending_oauth_states: set[str] = set()
 
 
-def verify_api_key(x_api_key: Optional[str] = Header(default=None)):
-    """Dependency — rejects requests with wrong or missing API key."""
-    if API_KEY and x_api_key != API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key. Send X-Api-Key header.")
-
-
-# ── Pydantic models ───────────────────────────────────────────────────────────
-
-class SensorReading(BaseModel):
-    """A single truck's J1939 sensor snapshot. All sensor fields are optional
-    so /validate can report which are missing rather than returning a 422 error."""
-    truck_id: str
-    engine_type: Optional[str] = None  # e.g. "Cummins X15", "Detroit DD15"
-    # J1939 features
-    soot_load_pct: Optional[float] = None
-    diff_pressure_psi: Optional[float] = None
-    peak_regen_temp_f: Optional[float] = None
-    regen_completion_rate: Optional[float] = None
-    incomplete_regen_streak: Optional[float] = None
-    regens_last_7_days: Optional[float] = None
-    nox_ppm: Optional[float] = None
-    pm_level_mg: Optional[float] = None
-    egt_pre_turbo_f: Optional[float] = None
-    egt_post_turbo_f: Optional[float] = None
-    egt_pre_dpf_f: Optional[float] = None
-    egt_post_dpf_f: Optional[float] = None
-    egt_dpf_delta_f: Optional[float] = None
-    def_level_pct: Optional[float] = None
-    idle_hours_24h: Optional[float] = None
-    idle_pct: Optional[float] = None
-    engine_load_pct: Optional[float] = None
-    engine_hours_total: Optional[float] = None
-    miles_on_dpf: Optional[float] = None
-    engine_age_years: Optional[float] = None
-    ambient_temp_f: Optional[float] = None
-    baro_pressure_kpa: Optional[float] = None
-    coolant_temp_f: Optional[float] = None
-    fuel_quality_score: Optional[float] = None
-
-
-class PredictionResult(BaseModel):
-    truck_id: str
-    risk_level: str
-    days_until_cleaning: Optional[float]
-    risk_weight: int
-    warnings: List[str]  # Domain-rule warnings from the sensor data
-
-
-class ValidationIssue(BaseModel):
-    field: str
-    status: str   # WARN or FAIL
-    message: str
-
-
-class ValidationResult(BaseModel):
-    truck_id: str
-    status: str   # PASS, WARN, or FAIL
-    issues: List[ValidationIssue]
-
-
-class TruckDPFStatus(BaseModel):
-    truck_id: str
-    risk_level: str
-    days_until_cleaning: Optional[float]
-
-
-# ── Risk helpers ──────────────────────────────────────────────────────────────
-
-def categorize_risk(days: Optional[float]) -> str:
-    if days is None:
-        return "UNKNOWN"
-    if days <= RISK_THRESHOLDS["CRITICAL"]:
-        return "CRITICAL"
-    if days <= RISK_THRESHOLDS["HIGH"]:
-        return "HIGH"
-    if days <= RISK_THRESHOLDS["MEDIUM"]:
-        return "MEDIUM"
-    return "LOW"
-
-
-# ── Model loading ─────────────────────────────────────────────────────────────
-
-def load_model():
-    model_path = os.getenv("MODEL_PATH", str(BASE_DIR / "model.xgb"))
-    if not os.path.exists(model_path):
-        return None
-    try:
-        import xgboost as xgb
-        booster = xgb.Booster()
-        booster.load_model(model_path)
-        return booster
-    except Exception as e:
-        print(f"[ThrottleGuard API] Model load failed: {e}")
-        return None
-
-
-# ── Data loading (for /api/dpf-status batch read) ────────────────────────────
-
-def load_data() -> pd.DataFrame:
-    candidates = [
-        os.getenv("THROTTLEGUARD_DATA_PATH", ""),
-        str(BASE_DIR / "dpf_cleaning_schedule_v15.csv"),
-        str(BASE_DIR / "sample_data.csv"),
-    ]
-    for path in candidates:
-        if path and os.path.exists(path):
-            try:
-                df = pd.read_csv(path)
-                df = preprocess(df)
-                return df
-            except Exception as e:
-                print(f"[ThrottleGuard API] Could not load {path}: {e}")
-    raise FileNotFoundError("No valid data file found for ThrottleGuard API")
-
-
-# ── Prediction helpers ────────────────────────────────────────────────────────
-
-def predict_from_df(df: pd.DataFrame) -> pd.Series:
-    """Run model prediction on a DataFrame. Falls back to sensor average heuristic
-    if the model file is missing — keeps the API running during early development."""
-    model = load_model()
-    if model is not None:
-        try:
-            import xgboost as xgb
-            feature_cols = [c for c in df.columns
-                            if c in J1939_FEATURES and pd.api.types.is_numeric_dtype(df[c])]
-            dmatrix = xgb.DMatrix(df[feature_cols])
-            return pd.Series(model.predict(dmatrix), index=df.index)
-        except Exception as e:
-            print(f"[ThrottleGuard API] Prediction failed, using fallback: {e}")
-
-    # Fallback: higher average sensor reading = fewer days until cleaning
-    numeric_cols = [c for c in df.columns if c in J1939_FEATURES
-                    and pd.api.types.is_numeric_dtype(df[c])]
-    if numeric_cols:
-        sensor_mean = df[numeric_cols].mean(axis=1)
-        return (1 - sensor_mean.clip(0, 1)) * 29 + 1
-    return pd.Series([None] * len(df), index=df.index)
-
-
-def reading_to_df(reading: SensorReading) -> pd.DataFrame:
-    """Convert a SensorReading Pydantic model to a single-row DataFrame."""
-    data = {f: [getattr(reading, f)] for f in J1939_FEATURES}
-    return pd.DataFrame(data)
-
-
-def check_domain_warnings(reading: SensorReading) -> List[str]:
-    """Apply domain rules from 20 years of diesel experience.
-    These catch patterns the model score alone might not surface clearly."""
-    warnings = []
-
-    # High backpressure matters even when soot looks OK — could be ash buildup
-    if (reading.diff_pressure_psi or 0) > 8 and (reading.soot_load_pct or 0) < 40:
-        warnings.append(
-            "High backpressure with low soot — possible ash buildup, not just soot clogging"
-        )
-
-    # All 4 EGT sensors identical on a hot engine = sensor fault or channeling
-    egt_vals = [reading.egt_pre_turbo_f, reading.egt_post_turbo_f,
-                reading.egt_pre_dpf_f, reading.egt_post_dpf_f]
-    if all(v is not None for v in egt_vals) and len(set(egt_vals)) == 1:
-        warnings.append(
-            "All 4 EGT sensors read identical — possible sensor fault or severe ash channeling"
-        )
-
-    # Declining regen temps over time = DPF degrading, not just dirty
-    if (reading.peak_regen_temp_f or 999) < 900 and (reading.engine_hours_total or 0) > 50_000:
-        warnings.append(
-            "Low regen temp on a high-hour engine — DPF may be degrading, not just dirty"
-        )
-
-    # Classic fast-clogging combination: short-haul + high idle + poor fuel
-    if ((reading.idle_pct or 0) > 40
-            and (reading.fuel_quality_score or 1) < 0.4
-            and (reading.miles_on_dpf or 999_999) < 100_000):
-        warnings.append(
-            "High idle + poor fuel quality + low miles — fastest DPF clogging combination"
-        )
-
-    # DEF critically low — SCR system at risk, nox will spike
-    if (reading.def_level_pct or 100) < 10:
-        warnings.append(
-            "DEF level critically low — SCR system at risk, separate from DPF issue"
-        )
-
-    # Failed regens piling up
-    if (reading.incomplete_regen_streak or 0) > 5:
-        warnings.append(
-            "Multiple consecutive failed regens — DPF is not recovering on its own"
-        )
-
-    return warnings
-
-
-# ── Validation helper ─────────────────────────────────────────────────────────
-
-def validate_reading(reading: SensorReading) -> ValidationResult:
-    """Validate a single sensor reading against expected ranges and domain rules."""
-    issues: List[ValidationIssue] = []
-
-    # Check all 24 J1939 features are present
-    for feature in J1939_FEATURES:
-        value = getattr(reading, feature)
-        if value is None:
-            issues.append(ValidationIssue(
-                field=feature,
-                status="FAIL",
-                message=f"Missing required feature: {feature}"
-            ))
-            continue
-
-        # Check value is within expected range
-        lo, hi = SENSOR_RANGES[feature]
-        if not (lo <= value <= hi):
-            issues.append(ValidationIssue(
-                field=feature,
-                status="WARN",
-                message=f"{feature}={value} is outside expected range [{lo}, {hi}]"
-            ))
-
-    # Domain rule: high backpressure + low soot is valid — do not flag as contradiction
-    # (This is intentionally not an error — ash buildup causes this)
-
-    # Domain rule: DEF = 0 with high nox = DEF system issue, not DPF
-    if (reading.def_level_pct == 0) and (reading.nox_ppm or 0) > 500:
-        issues.append(ValidationIssue(
-            field="def_level_pct",
-            status="WARN",
-            message="DEF=0 with high NOx — this is a DEF/SCR system issue, not a DPF issue"
-        ))
-
-    # Determine overall status
-    if any(i.status == "FAIL" for i in issues):
-        overall = "FAIL"
-    elif any(i.status == "WARN" for i in issues):
-        overall = "WARN"
-    else:
-        overall = "PASS"
-
-    return ValidationResult(truck_id=reading.truck_id, status=overall, issues=issues)
-
-
-# ── Routes ────────────────────────────────────────────────────────────────────
+# ── Route 1: Health check ──────────────────────────────────────────────────────
 
 @app.get("/health")
-def health():
-    """Railway health check — no auth required."""
-    return {"status": "ok", "service": "ThrottleGuard DPF API", "version": "2.0.0"}
+async def health():
+    """Railway uses this to verify the service is alive."""
+    return {
+        "status": "ok",
+        "service": "ThrottleGuard Ingestion API",
+        "version": "2.0.0",
+        "timestamp": datetime.utcnow().isoformat(),
+    }
 
 
-@app.get("/api/dpf-status", response_model=List[TruckDPFStatus],
-         dependencies=[Depends(verify_api_key)])
-def get_dpf_status():
+# ── Route 2: OAuth – start the flow ───────────────────────────────────────────
+
+@app.get("/authorize")
+async def motive_authorize(key: str = ""):
     """
-    Returns DPF risk status for every truck in the latest dataset.
-    Used by the AI Dispatcher to decide which trucks are safe to dispatch.
-    Requires X-Api-Key header.
+    Send the fleet operator to Motive's consent screen.
+
+    Open this URL in a browser (query param, not a header, since a human is
+    clicking a link and can't set custom headers):
+        https://<api-service>.up.railway.app/authorize?key=<MOTIVE_SETUP_KEY>
+
+    Motive will show the operator a permission grant page, then redirect to
+    /callback with an authorization code. The state param is a random token
+    stored in memory to detect CSRF — if the callback arrives with an unknown
+    state we reject it. Gating /authorize with MOTIVE_SETUP_KEY also protects
+    /callback indirectly: without a valid key, no state ever gets created, so
+    an attacker hitting /callback directly has no state that will pass.
     """
-    try:
-        df = load_data()
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+    if not MOTIVE_SETUP_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="MOTIVE_SETUP_KEY must be set in Railway env vars before /authorize can be used",
+        )
+    if not hmac.compare_digest(MOTIVE_SETUP_KEY, key):
+        raise HTTPException(status_code=401, detail="Missing or invalid ?key= parameter")
 
-    df["_days"] = predict_from_df(df)
-    df["_risk"] = df["_days"].apply(categorize_risk)
+    if not MOTIVE_CLIENT_ID or not MOTIVE_REDIRECT_URI:
+        raise HTTPException(
+            status_code=500,
+            detail="MOTIVE_CLIENT_ID and MOTIVE_REDIRECT_URI must be set in Railway env vars",
+        )
 
-    if "truck_id" not in df.columns:
-        df["truck_id"] = [f"T{i+1}" for i in range(len(df))]
+    state = secrets.token_urlsafe(32)
+    _pending_oauth_states.add(state)
 
-    # One reading per truck — use worst-case (lowest days) reading
-    result = (
-        df.groupby("truck_id")
-        .apply(lambda g: g.loc[g["_days"].idxmin()] if g["_days"].notna().any() else g.iloc[0])
-        .reset_index(drop=True)
+    params = (
+        f"?client_id={MOTIVE_CLIENT_ID}"
+        f"&redirect_uri={MOTIVE_REDIRECT_URI}"
+        f"&response_type=code"
+        f"&scope={MOTIVE_SCOPES.replace(' ', '%20')}"
+        f"&state={state}"
     )
+    log.info(f"Starting Motive OAuth flow — state: {state[:8]}...")
+    return RedirectResponse(url=MOTIVE_AUTH_URL + params)
+
+
+# ── Route 3: OAuth – callback ──────────────────────────────────────────────────
+
+@app.get("/callback")
+async def motive_oauth_callback(request: Request):
+    """
+    Motive redirects here after the fleet operator authorizes your app.
+    URL looks like: /callback?code=ABC123&state=xyz
+
+    Exchange the code for a token, persist it to Supabase via tg_motive_auth —
+    token survives Railway restarts so the fleet doesn't have to re-authorize.
+    """
+    code  = request.query_params.get("code")
+    state = request.query_params.get("state")
+    error = request.query_params.get("error")
+
+    if error:
+        log.error(f"Motive OAuth error: {error}")
+        safe_error = html.escape(error)
+        return HTMLResponse(content=f"<h2>Authorization failed: {safe_error}</h2>", status_code=400)
+
+    if not code:
+        log.error("No authorization code in OAuth callback")
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+
+    # CSRF check — state must match one we issued from /authorize
+    if state not in _pending_oauth_states:
+        log.error(f"OAuth callback with unknown state '{state}' — possible CSRF or stale link")
+        raise HTTPException(status_code=400, detail="Invalid state parameter — start the flow again via /authorize")
+    _pending_oauth_states.discard(state)
+
+    log.info(f"OAuth callback received — code: {code[:8]}... state: {state}")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                MOTIVE_TOKEN_URL,
+                data={
+                    "grant_type":    "authorization_code",
+                    "code":          code,
+                    "redirect_uri":  MOTIVE_REDIRECT_URI,
+                    "client_id":     MOTIVE_CLIENT_ID,
+                    "client_secret": MOTIVE_CLIENT_SECRET,
+                },
+            )
+
+        if response.status_code != 200:
+            log.error(f"Motive token exchange failed: {response.status_code} {response.text}")
+            raise HTTPException(status_code=500, detail="Token exchange failed")
+
+        token_data    = response.json()
+        access_token  = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        expires_in    = int(token_data.get("expires_in") or 3600)
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.error(f"Token exchange exception: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    save_token(PROVIDER, access_token, refresh_token, expires_in)
+    log.info(f"Motive token saved to Supabase — expires in {expires_in}s")
+
+    success_html = """
+    <html>
+      <body style="font-family: sans-serif; background: #1a1a1a; color: #FFB300;
+                  text-align: center; padding-top: 80px;">
+        <h1>ThrottleGuard Connected to Motive</h1>
+        <p style="color: #ccc;">Authorization successful. You can close this tab.</p>
+      </body>
+    </html>
+    """
+    return HTMLResponse(content=success_html)
+
+
+# ── Route 3: Motive webhook receiver ──────────────────────────────────────────
+
+@app.post("/webhook")
+async def motive_webhook(request: Request):
+    """
+    Motive POSTs real-time events here as JSON.
+
+    Each event is routed to the appropriate Motive-specific handler, which
+    calls a normalize_motive_*() function from tg_telematics_adapters to
+    produce a canonical J1939 row (or partial row). That normalized shape is
+    what the scoring engine and dashboard already consume — adding Samsara or
+    Geotab webhooks later means adding adapters in tg_telematics_adapters.py,
+    not changing this routing layer.
+
+    Motive expects a 200 back or it will retry.
+
+    Signature header: X-Motive-Hmac-SHA256 (verify exact name in your Motive
+    developer portal → Webhooks → your endpoint settings).
+    MOTIVE_WEBHOOK_SECRET must be set in Railway env vars — without it, every
+    call is rejected with 503 rather than silently accepting unsigned
+    payloads from any sender.
+    """
+    if not MOTIVE_WEBHOOK_SECRET:
+        log.error("Webhook rejected — MOTIVE_WEBHOOK_SECRET is not configured")
+        raise HTTPException(status_code=503, detail="Webhook receiver not configured — set MOTIVE_WEBHOOK_SECRET")
+
+    body = await request.body()
+
+    sig_header = (
+        request.headers.get("X-Motive-Hmac-SHA256")
+        or request.headers.get("X-Hub-Signature-256", "")
+    )
+    expected = hmac.new(
+        MOTIVE_WEBHOOK_SECRET.encode(),
+        body,
+        hashlib.sha256,
+    ).hexdigest()
+    # Motive may prefix the value with "sha256=" — strip it before comparing
+    received = sig_header.removeprefix("sha256=")
+    if not hmac.compare_digest(expected, received):
+        log.warning("Webhook rejected — HMAC signature mismatch")
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    try:
+        payload = json.loads(body)
+    except Exception:
+        log.error("Webhook payload is not valid JSON")
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    event_type = str(payload.get("event_type") or payload.get("type") or "unknown")
+    log.info(f"Webhook received — event_type: {event_type}")
+
+    if "fault" in event_type.lower():
+        _handle_fault_event(payload)
+    elif "engine" in event_type.lower():
+        _handle_engine_event(payload)
+    elif "vehicle" in event_type.lower():
+        _handle_vehicle_event(payload)
+    else:
+        log.info(f"Unhandled event type '{event_type}' — logged, no action taken")
+
+    return JSONResponse(content={"received": True})
+
+
+# ── Webhook handlers ───────────────────────────────────────────────────────────
+
+def _handle_fault_event(payload: dict) -> None:
+    """
+    Handles Fault Code Opened/Closed events from Motive.
+
+    Calls normalize_motive_fault_event() to map Motive's SPN/FMI payload into
+    ThrottleGuard's canonical J1939 row shape. The normalized result is what
+    any downstream scoring trigger or Supabase write should work with — no
+    Motive-specific fields beyond this point.
+    """
+    row = normalize_motive_fault_event(payload)
+
+    if row is None:
+        spn = payload.get("spn")
+        log.debug(f"Fault event for SPN {spn} — not a tracked DPF/SCR signal, skipped")
+        return
+
+    vid        = row["vehicle_id"]
+    spn        = row.get("_spn")
+    fault_open = row.get("_fault_open")
+
+    canonical = {k: v for k, v in row.items() if not k.startswith("_") and k != "vehicle_id"}
+    if canonical:
+        detail = f"canonical fields updated: {canonical}"
+    else:
+        detail = f"relates to '{row.get('_needs_numeric_lookup', '?')}' — needs numeric-stats feed for actual value"
+
+    log.info(f"[{vid}] Fault {'OPENED' if fault_open else 'CLOSED'} — SPN {spn} — {detail}")
+    if fault_open:
+        log.warning(f"[{vid}] DPF/SCR fault OPEN — SPN {spn}")
+
+    # TODO: write normalized row to Supabase tg_fault_events table
+    # TODO: trigger scoring engine re-run for this vehicle if fault_open
+    # TODO: if scoring returns CRITICAL, flag for AI dispatcher to block load assignment
+
+
+def _handle_engine_event(payload: dict) -> None:
+    """
+    Handles Engine On/Off events.
+
+    Normalizes into a canonical engine-state record. Used for idle-hour tracking
+    (Rule 7: excessive idle accelerates DPF clogging). Aggregating on/off events
+    into an idle_time_pct that the scoring engine can use is a future pipeline step.
+    """
+    row = normalize_motive_engine_event(payload)
+    if row is None:
+        return
+
+    log.info(f"[{row['vehicle_id']}] Engine {row.get('_engine_state', '?')} at {row.get('_timestamp')}")
+
+    # TODO: write to tg_engine_events; aggregate idle_time_pct per vehicle per 24h window
+
+
+def _handle_vehicle_event(payload: dict) -> None:
+    """
+    Handles Vehicle Upserted events — fires when a truck is added to the Motive fleet.
+    Auto-onboards the truck into ThrottleGuard using the normalized canonical record.
+    """
+    row = normalize_motive_vehicle_event(payload)
+    if row is None:
+        return
+
+    log.info(f"New vehicle — ID: {row['vehicle_id']} | Name: {row.get('_name')} | VIN: {row.get('_vin')}")
+
+    # TODO: upsert into tg_fleet (or tg_predictions scaffold) so the dashboard knows this truck exists
+
+
+# ── Route 4: token status (internal) ──────────────────────────────────────────
+
+@app.get("/token")
+async def token_status():
+    """
+    Internal endpoint — confirms a Motive token is stored and its expiry state.
+    Attempts a token refresh automatically if the token is expired or close to expiry.
+
+    Returns metadata only (no access/refresh token values) so this can safely be
+    hit by health-check scripts. Pollers that need the actual token call
+    tg_motive_auth.get_token("motive") directly inside the service process.
+    """
+    stored = get_token(PROVIDER)
+    if not stored:
+        raise HTTPException(status_code=404, detail="No token stored — visit /authorize to connect Motive")
+
+    refreshed = False
+    if token_is_expired(PROVIDER):
+        log.info("Token expired or expiring soon — attempting refresh")
+        ok = refresh_access_token(PROVIDER, MOTIVE_CLIENT_ID, MOTIVE_CLIENT_SECRET, MOTIVE_TOKEN_URL)
+        if ok:
+            stored    = get_token(PROVIDER)
+            refreshed = True
+        else:
+            log.warning("Token refresh failed — re-authorization needed via /authorize")
+
+    return {
+        "provider":   PROVIDER,
+        "expires_at": stored["expires_at"],
+        "updated_at": stored["updated_at"],
+        "expired":    token_is_expired(PROVIDER),
+        "refreshed":  refreshed,
+    }
+
+
+# ── Route 5: DPF status feed for Mya (AI dispatcher) ──────────────────────────
+
+# Optional API key — set THROTTLEGUARD_API_KEY to require callers to present it.
+# If unset, the endpoint is open (suitable for internal Railway private networking).
+_TG_API_KEY = os.environ.get("THROTTLEGUARD_API_KEY", "")
+
+# Days-until-cleaning estimate per priority — used when no service date is stored.
+_DAYS_UNTIL_CLEANING = {"CRITICAL": 2, "HIGH": 7, "MEDIUM": 14, "LOW": 30}
+
+
+@app.get("/api/dpf-status")
+async def dpf_status(request: Request):
+    """
+    Returns the latest DPF risk score per vehicle for Mya (AI dispatcher).
+
+    Response shape matches what fleet-context.ts in the ai-receptionist expects:
+        [{ "truck_id": "...", "risk_level": "CRITICAL|HIGH|MEDIUM|LOW",
+           "days_until_cleaning": <int> }, ...]
+
+    Secured by X-Api-Key header when THROTTLEGUARD_API_KEY env var is set.
+    If the env var is empty the endpoint is open — fine for Railway private networking.
+    """
+    if _TG_API_KEY:
+        provided = request.headers.get("X-Api-Key", "")
+        if not hmac.compare_digest(_TG_API_KEY, provided):
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
+    import psycopg2
+    import psycopg2.extras
+
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
+
+    try:
+        conn = psycopg2.connect(db_url, connect_timeout=8)
+        try:
+            with conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                # Latest prediction per vehicle (highest id = most recent insert)
+                cur.execute(
+                    """
+                    SELECT DISTINCT ON (vehicle_id)
+                        vehicle_id,
+                        predicted_priority,
+                        risk_score
+                    FROM tg_predictions
+                    ORDER BY vehicle_id, id DESC
+                    """
+                )
+                rows = cur.fetchall()
+        finally:
+            conn.close()
+    except Exception as exc:
+        log.error(f"/api/dpf-status DB error: {exc}")
+        raise HTTPException(status_code=503, detail="Database unavailable")
 
     return [
-        TruckDPFStatus(
-            truck_id=str(row["truck_id"]),
-            risk_level=str(row["_risk"]),
-            days_until_cleaning=round(float(row["_days"]), 1) if pd.notna(row["_days"]) else None,
-        )
-        for _, row in result.iterrows()
+        {
+            "truck_id":            row["vehicle_id"],
+            "risk_level":          row["predicted_priority"],
+            "days_until_cleaning": _DAYS_UNTIL_CLEANING.get(row["predicted_priority"], 30),
+        }
+        for row in rows
     ]
 
 
-@app.post("/predict", response_model=PredictionResult,
-          dependencies=[Depends(verify_api_key)])
-def predict(reading: SensorReading):
-    """
-    Predict DPF risk for a single truck from live sensor readings.
-    Returns risk level, days until service, and any domain-rule warnings.
-    Requires X-Api-Key header.
-    """
-    # Validate first — don't predict on garbage data
-    validation = validate_reading(reading)
-    if validation.status == "FAIL":
-        missing = [i.field for i in validation.issues if i.status == "FAIL"]
-        raise HTTPException(
-            status_code=422,
-            detail=f"Missing required sensor fields: {missing}. Run POST /validate for details."
-        )
-
-    df = reading_to_df(reading)
-    days_series = predict_from_df(df)
-    days = float(days_series.iloc[0]) if days_series.iloc[0] is not None else None
-    risk = categorize_risk(days)
-    warnings = check_domain_warnings(reading)
-
-    print(f"[ThrottleGuard API] /predict — truck={reading.truck_id} risk={risk} days={days}")
-
-    return PredictionResult(
-        truck_id=reading.truck_id,
-        risk_level=risk,
-        days_until_cleaning=round(days, 1) if days is not None else None,
-        risk_weight=RISK_WEIGHTS.get(risk, 1),
-        warnings=warnings,
-    )
-
-
-@app.post("/predict/batch", response_model=List[PredictionResult],
-          dependencies=[Depends(verify_api_key)])
-def predict_batch(readings: List[SensorReading]):
-    """
-    Predict DPF risk for multiple trucks in a single request.
-    Each truck is validated individually — FAIL units are returned with
-    risk_level=UNKNOWN rather than rejecting the entire batch.
-    Requires X-Api-Key header.
-    """
-    results = []
-
-    for reading in readings:
-        validation = validate_reading(reading)
-        if validation.status == "FAIL":
-            # Don't block the whole batch — return UNKNOWN for bad units
-            missing = [i.field for i in validation.issues if i.status == "FAIL"]
-            results.append(PredictionResult(
-                truck_id=reading.truck_id,
-                risk_level="UNKNOWN",
-                days_until_cleaning=None,
-                risk_weight=0,
-                warnings=[f"Missing fields, cannot predict: {missing}"],
-            ))
-            continue
-
-        df = reading_to_df(reading)
-        days_series = predict_from_df(df)
-        days = float(days_series.iloc[0]) if days_series.iloc[0] is not None else None
-        risk = categorize_risk(days)
-        warnings = check_domain_warnings(reading)
-
-        results.append(PredictionResult(
-            truck_id=reading.truck_id,
-            risk_level=risk,
-            days_until_cleaning=round(days, 1) if days is not None else None,
-            risk_weight=RISK_WEIGHTS.get(risk, 1),
-            warnings=warnings,
-        ))
-
-    print(f"[ThrottleGuard API] /predict/batch — {len(readings)} units, "
-          f"{sum(1 for r in results if r.risk_level == 'CRITICAL')} CRITICAL")
-
-    return results
-
-
-@app.post("/validate", response_model=List[ValidationResult],
-          dependencies=[Depends(verify_api_key)])
-def validate(readings: List[SensorReading]):
-    """
-    Validate sensor data against expected J1939 ranges and domain rules
-    before sending to /predict. Use this to catch bad data early.
-    Returns PASS / WARN / FAIL per unit with specific issue details.
-    Requires X-Api-Key header.
-    """
-    results = [validate_reading(r) for r in readings]
-
-    passed = sum(1 for r in results if r.status == "PASS")
-    warned = sum(1 for r in results if r.status == "WARN")
-    failed = sum(1 for r in results if r.status == "FAIL")
-    print(f"[ThrottleGuard API] /validate — {passed} PASS, {warned} WARN, {failed} FAIL")
-
-    return results
-
-
-# ── Entry point ───────────────────────────────────────────────────────────────
+# ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    port = int(os.getenv("THROTTLEGUARD_PORT", "8001"))
-    uvicorn.run("api:app", host="0.0.0.0", port=port, reload=False)
+    import uvicorn
+    uvicorn.run("api:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), reload=True)

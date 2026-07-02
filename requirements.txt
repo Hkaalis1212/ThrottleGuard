@@ -10,3 +10,5 @@ requests
 APScheduler
 twilio
 flask
+fastapi
+uvicorn[standard]
