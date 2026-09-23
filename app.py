@@ -31,6 +31,7 @@ from tg_subscription import (
     cancel_subscription, PRICING_TIERS, TRIAL_DAYS,
     get_tier_for_fleet, monthly_price,
 )
+from tg_hubspot_sync import push_trial_start
 from tg_styles import (
     inject_styles,
     PRIORITY_COLOR, PRIORITY_ORDER,
@@ -74,6 +75,8 @@ if not st.session_state["_sub_active"]:
         if st.button("Start Free Trial", type="primary", use_container_width=True):
             result = start_trial(_fleet_id)
             if result["success"]:
+                _user_email = st.session_state.get("tg_user", {}).get("username", "")
+                push_trial_start(_user_email)
                 st.success(f"Trial started — {TRIAL_DAYS} days of full access.")
                 st.session_state.pop("_sub_active", None)
                 st.rerun()
