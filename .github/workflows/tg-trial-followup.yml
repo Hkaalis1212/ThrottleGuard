@@ -1,0 +1,20 @@
+name: ThrottleGuard trial follow-up
+
+on:
+  schedule:
+    # 13:00 UTC ~= 9am US/Eastern (drifts an hour across DST — good enough for a daily check-in)
+    - cron: "0 13 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  draft-followups:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - run: python tg_trial_followup_cron.py
+        env:
+          HUBSPOT_PRIVATE_APP_TOKEN: ${{ secrets.HUBSPOT_PRIVATE_APP_TOKEN }}
