@@ -13,7 +13,7 @@ Produce full sequences (subject/message + timing), not just one-off messages —
 - Day 0: welcome + first CSV upload / first score walkthrough CTA.
 - Day 2-3: check-in — did they upload data? If not, remove friction (offer the demo dataset, offer a call).
 - Day 7 (midpoint): highlight one specific finding style (e.g., "here's what a CRITICAL score looks like and why") to reinforce value before renewal decision fatigue sets in.
-- Day 11-12: pre-expiry nudge — plan comparison (monthly vs. annual), no fake urgency, just a clear "trial ends in 2 days" fact plus what happens to their data/access.
+- Day 11-12: pre-expiry nudge — show their actual per-truck tier and monthly total (no annual plan currently exists — don't offer one), no fake urgency, just a clear "trial ends in 2 days" fact plus what happens to their data/access.
 - Day 14/expiry: trial-ended message — clear upgrade path, reassurance their data isn't lost, low-friction upgrade CTA.
 - Day 17-21 (if no conversion): soft win-back — ask what held them back, offer a call, don't hard-sell again immediately.
 

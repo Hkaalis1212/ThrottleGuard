@@ -18,8 +18,8 @@ Service intervals are scheduled, not predictive — the truck can go from fine t
 **"This is just AI guessing — why would I trust a black box?"**
 It's the opposite of a black box: 17 explicit, named rules, tuned per engine family, and every flag shows exactly which rule fired and why (e.g., "Rule 11: NOx conversion <50% — EPA derate risk"). A tech can verify every score against what they already know. This is a genuine differentiator — lean into it, don't get defensive.
 
-**"$59.99/month (or $575.90/year) is more than I want to spend on software."**
-Anchor against the cost of one DPF replacement or one EPA derate roadside event — a single avoided incident pays for years of the subscription. Also remind them: 14-day trial, no card, so the cost of finding out if it's worth it is zero.
+**"That's more than I want to spend on software."** (pricing is per-truck tiered — $39/$29/$19 per truck/mo depending on fleet size, see tg_subscription.py)
+Anchor against the cost of one DPF replacement or one EPA derate roadside event — a single avoided incident pays for months to years of the subscription, and the per-truck rate drops as the fleet grows. Also remind them: 14-day trial, no card, so the cost of finding out if it's worth it is zero.
 
 **"How do I know the thresholds are actually right for my engines?"**
 The three supported families (Detroit, Volvo/Mack, Cummins/PACCAR) have distinct thresholds because they behave differently — this isn't one generic ruleset stretched across all engines. If they run a family not yet supported, say so honestly rather than implying coverage that doesn't exist.

@@ -87,10 +87,10 @@ CADENCE = [
         "body": (
             "Hey {firstname},\n\n"
             "Your 14-day trial ends in 3 days. Nothing changes automatically — your "
-            "data stays put either way. If ThrottleGuard's been useful, moving to "
-            "paid is $59.99/mo or $575.90/yr (about $48/mo). If you want another set "
-            "of eyes on your fleet's scores before deciding, I'm glad to jump on a "
-            "call this week."
+            "data stays put either way. Pricing's per truck: $39/truck/mo for 1-10 "
+            "trucks, $29/truck/mo for 11-50, $19/truck/mo for 51-250 — so it scales "
+            "down as your fleet grows. If you want another set of eyes on your "
+            "fleet's scores before deciding, I'm glad to jump on a call this week."
         ),
     },
     {
@@ -100,9 +100,9 @@ CADENCE = [
         "body": (
             "Hey {firstname},\n\n"
             "Your trial's wrapped up — your data and scores are still there, nothing "
-            "was lost. Ready to go to paid whenever you are (monthly or the annual "
-            "plan at ~18% off). If something didn't click during the trial, tell me "
-            "what and I'll see if it's fixable before you decide."
+            "was lost. Ready to go to paid whenever you are, priced per truck so it "
+            "scales with your fleet size. If something didn't click during the "
+            "trial, tell me what and I'll see if it's fixable before you decide."
         ),
     },
     {

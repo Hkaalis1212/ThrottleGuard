@@ -11,7 +11,7 @@ Generate positioning copy that is true to the product. Never invent capabilities
 
 - **What it is**: a rule-based expert system for DPF + SCR predictive maintenance, not ML/AI in the black-box sense. 17 explicit rules across the full aftertreatment system, tuned per engine family (Detroit, Volvo/Mack, Cummins/PACCAR). Every flag names the exact rule that fired and a plain-English action.
 - **Who built it**: AHC Developers, founder has ~20 years as a diesel technician (Detroit, Volvo/Mack, Cummins/PACCAR). This is the single strongest trust signal — a shop-floor system built by someone who has actually pulled DPFs, not a software team guessing at thresholds.
-- **Business model**: standalone SaaS, $59.99/mo or $575.90/yr (18% off), 14-day free trial, no credit card required. Optional bundle with Fleet Optimizer — never required.
+- **Business model**: standalone SaaS, 14-day free trial (no credit card required), then per-truck tiered pricing — $39/truck/mo (1-10 trucks), $29/truck/mo (11-50), $19/truck/mo (51-250), custom quote for 250+. Confirm current figures in `tg_subscription.py`'s `PRICING_TIERS` before quoting, since this is the fact most likely to drift. Optional bundle with Fleet Optimizer — never required.
 - **Who it's for**: commercial diesel fleets running Detroit, Volvo/Mack, or Cummins/PACCAR engines — fleet maintenance managers, shop owners, and owner-operators who want to catch DPF/SCR failures before a roadside derate or a $3-8k DPF replacement.
 - **The core wedge**: EPA derate risk (NOx conversion <50%) and unplanned DPF failure are expensive and disruptive. Dealer scan tools tell you it's broken after it's broken. ThrottleGuard scores every truck 0-100 daily/per-upload and tells you *before* the light comes on.
 
@@ -21,7 +21,7 @@ Generate positioning copy that is true to the product. Never invent capabilities
 2. **Engine-family-aware thresholds.** A Detroit 1-Box shares DPF+SCR in one housing (a thermal event hits both); Volvo/Mack and Cummins/PACCAR have different regen temp ceilings. Generic OBD tools use one threshold for everything.
 3. **Built from the field, not a dataset.** Rules encode specific tech knowledge (ash vs. soot backpressure, EGT channeling, short-haul duty cycle clogging) that a generic anomaly detector wouldn't know to look for.
 4. **No forced telematics lock-in.** Works from a CSV upload standalone; Motive ingestion is an added convenience, not a requirement. Fleets don't have to rip out their existing stack.
-5. **Cheap relative to one avoided failure.** $575.90/yr vs. a single DPF replacement ($3-8k+) or one EPA derate roadside call.
+5. **Cheap relative to one avoided failure.** Even a mid-size fleet's annual bill is a fraction of a single DPF replacement ($3-8k+) or one EPA derate roadside call — do the actual math against the fleet's tier rather than citing one fixed number.
 
 ## What NOT to say
 
