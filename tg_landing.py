@@ -8,7 +8,14 @@ Flow:
   2. Email field + CSV upload form
   3. Single-truck score breakdown (highest-risk truck from uploaded CSV)
   4. Blurred preview of remaining fleet rows (creates FOMO)
-  5. CTA → Stripe Checkout (14-day free trial, no card needed until day 15)
+  5. CTA → "Request Access" — logs the lead in HubSpot for manual follow-up
+
+Lead-capture only, not self-serve checkout: the main app is single-tenant
+(one Railway deployment per customer, fleet_id = "admin" — see CLAUDE.md),
+so there's no automated way yet to provision a new customer's account.
+Taking payment here with no way to deliver access would be a real trust
+problem, so this page stops at capturing the lead — a human sets up the
+new customer's deployment manually after HubSpot notifies them.
 
 Run standalone (local dev):
   streamlit run tg_landing.py --server.port 8502
@@ -16,31 +23,22 @@ Run standalone (local dev):
 Deploy on Railway as a second service pointing to this file.
 
 Env vars used:
-  STRIPE_SECRET_KEY    — Stripe secret key
-  TG_LANDING_URL       — Full base URL of THIS page (e.g. https://landing.throttleguard.app)
-                         Used to build Stripe success/cancel URLs.
-                         Defaults to http://localhost:8502
-  TG_APP_URL           — URL of the main app (shown in success redirect hint).
-                         Defaults to http://localhost:8501
+  HUBSPOT_PRIVATE_APP_TOKEN — logs captured leads in HubSpot (optional —
+                              the page still works without it, it just
+                              won't notify anyone of new leads)
 """
 
 import io
-import os
 
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
-import stripe
 
 from scoring_engine import score_row, SCORE_COLUMNS
+from tg_hubspot_sync import push_landing_lead
 from tg_logo import _svg_to_img_tag, get_logo_svg
 
-# ── Stripe config ─────────────────────────────────────────────────────────────
-
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
-
-# Per-truck / month tiers — amount = fleet_size × per_truck rate.
-# Enterprise (250+) is custom — no automated checkout.
+# Per-truck / month tiers — informational only on this page (no checkout).
+# Enterprise (250+) is custom — no automated pricing shown.
 PRICING_TIERS = [
     {"key": "starter", "label": "Starter", "min": 1,   "max": 10,  "per_truck": 39.00},
     {"key": "growth",  "label": "Growth",  "min": 11,  "max": 50,  "per_truck": 29.00},
@@ -48,9 +46,6 @@ PRICING_TIERS = [
 ]
 
 TRIAL_DAYS = 14
-
-BASE_URL = os.getenv("TG_LANDING_URL", "http://localhost:8502")
-APP_URL  = os.getenv("TG_APP_URL",     "http://localhost:8501")
 
 # ── CSV validation ────────────────────────────────────────────────────────────
 
@@ -179,7 +174,7 @@ def score_fleet_csv(file_bytes: bytes) -> tuple[pd.DataFrame | None, str | None]
     return df, None
 
 
-# ── Stripe checkout ───────────────────────────────────────────────────────────
+# ── Lead capture ──────────────────────────────────────────────────────────────
 
 def recommended_tier(fleet_size: int) -> dict:
     """Return the PRICING_TIERS entry matching fleet_size (defaults to starter for 0)."""
@@ -189,39 +184,20 @@ def recommended_tier(fleet_size: int) -> dict:
     return PRICING_TIERS[0]  # default: starter
 
 
-def create_checkout_url(email: str, fleet_size: int = 10) -> tuple[str | None, str | None]:
+def capture_lead(email: str, fleet_size: int, worst_row: pd.Series, n_critical: int, n_high: int) -> None:
     """
-    Create a Stripe Checkout Session with dynamic per-truck pricing.
-    Amount = fleet_size × per_truck rate. 14-day free trial, no card charged until day 15.
-    Returns (checkout_url, error_msg).
+    Log the lead in HubSpot so a human can follow up and manually provision
+    their account. Fire-and-forget — push_landing_lead() never raises.
     """
-    if not stripe.api_key or stripe.api_key.startswith("sk_test_..."):
-        return APP_URL, None
-
-    tier = recommended_tier(fleet_size)
-    amount_cents = int(round(fleet_size * tier["per_truck"] * 100))
-    product_name = f"ThrottleGuard {tier['label']} ({fleet_size} trucks)"
-
-    try:
-        session = stripe.checkout.Session.create(
-            mode="subscription",
-            customer_email=email if email else None,
-            line_items=[{
-                "price_data": {
-                    "currency": "usd",
-                    "product_data": {"name": product_name},
-                    "unit_amount": amount_cents,
-                    "recurring": {"interval": "month"},
-                },
-                "quantity": 1,
-            }],
-            subscription_data={"trial_period_days": TRIAL_DAYS},
-            success_url=f"{BASE_URL}/?checkout=success",
-            cancel_url=f"{BASE_URL}/",
-        )
-        return session.url, None
-    except stripe.error.StripeError as exc:
-        return None, str(exc)
+    note_body = (
+        f"Source: ThrottleGuard landing page (lead-capture, no payment collected).\n"
+        f"Fleet size: {fleet_size} trucks ({n_critical} CRITICAL, {n_high} HIGH).\n"
+        f"Worst truck: {worst_row['vehicle_id']} — score {int(worst_row['rule_score'])}/100, "
+        f"{worst_row['priority_label']}, failure mode: {worst_row['failure_mode']}.\n"
+        f"Recommended tier: {recommended_tier(fleet_size)['label']}.\n"
+        f"Action: reach out and manually set up their Railway deployment/account."
+    )
+    push_landing_lead(email, note_body)
 
 
 # ── Score card ────────────────────────────────────────────────────────────────
@@ -264,7 +240,6 @@ def render_score_card(row: pd.Series) -> None:
         padding: 1.5rem 1.75rem 1.25rem;
         margin-top: 0.5rem;
     ">
-        <!-- Truck ID + priority -->
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.2rem;">
             <div>
                 <div style="font-family:'Barlow Condensed',sans-serif;font-size:0.65rem;
@@ -281,8 +256,6 @@ def render_score_card(row: pd.Series) -> None:
                 padding:4px 14px;border-radius:4px;
             ">{icon} {priority}</span>
         </div>
-
-        <!-- Score gauge -->
         <div style="margin-bottom:1.25rem;">
             <div style="display:flex;justify-content:space-between;
                 font-family:'Barlow Condensed',sans-serif;font-size:0.65rem;
@@ -298,8 +271,6 @@ def render_score_card(row: pd.Series) -> None:
                     border-radius:4px;transition:width 0.4s ease;"></div>
             </div>
         </div>
-
-        <!-- Two-column: Mode + Action -->
         <div style="display:grid;grid-template-columns:1fr 2fr;gap:1rem;margin-bottom:1.25rem;">
             <div>
                 <div style="font-family:'Barlow Condensed',sans-serif;font-size:0.62rem;
@@ -334,13 +305,10 @@ def render_score_card(row: pd.Series) -> None:
                 ">{action}</div>
             </div>
         </div>
-
-        <!-- Rules fired -->
         <div>
             <div style="font-family:'Barlow Condensed',sans-serif;font-size:0.62rem;
                 letter-spacing:0.12em;text-transform:uppercase;color:#4a6070;
-                margin-bottom:8px;">Rules Fired</div>
-            {rules_html}
+                margin-bottom:8px;">Rules Fired</div>{rules_html}
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -363,18 +331,17 @@ def render_blurred_preview(df: pd.DataFrame, shown_vid: str) -> None:
     rows_html = ""
     for _, row in rest.iterrows():
         c = PRIORITY_COLOR.get(row["priority_label"], "#546e7a")
-        rows_html += f"""
-        <div style="
-            background:#0f1217;border:1px solid #1a2130;border-left:3px solid {c};
-            border-radius:5px;padding:0.6rem 0.9rem;margin-bottom:6px;
-            display:flex;align-items:center;justify-content:space-between;
-        ">
-            <span style="font-family:'JetBrains Mono',monospace;
-                font-size:0.88rem;color:#e8edf2;">{row['vehicle_id']}</span>
-            <span style="font-family:'JetBrains Mono',monospace;
-                font-size:0.82rem;color:{c};font-weight:600;">
-                {int(row['rule_score'])}/100 · {row['priority_label']}</span>
-        </div>"""
+        rows_html += (
+            f'<div style="background:#0f1217;border:1px solid #1a2130;border-left:3px solid {c};'
+            f'border-radius:5px;padding:0.6rem 0.9rem;margin-bottom:6px;'
+            f'display:flex;align-items:center;justify-content:space-between;">'
+            f'<span style="font-family:\'JetBrains Mono\',monospace;'
+            f'font-size:0.88rem;color:#e8edf2;">{row["vehicle_id"]}</span>'
+            f'<span style="font-family:\'JetBrains Mono\',monospace;'
+            f'font-size:0.82rem;color:{c};font-weight:600;">'
+            f'{int(row["rule_score"])}/100 · {row["priority_label"]}</span>'
+            f'</div>'
+        )
 
     more = len(df) - 1 - len(rest)
     more_line = (
@@ -385,12 +352,7 @@ def render_blurred_preview(df: pd.DataFrame, shown_vid: str) -> None:
 
     st.markdown(f"""
     <div style="position:relative;margin-top:0.75rem;">
-        <!-- blurred trucks -->
-        <div style="filter:blur(4px);pointer-events:none;user-select:none;">
-            {rows_html}
-            {more_line}
-        </div>
-        <!-- lock overlay -->
+        <div style="filter:blur(4px);pointer-events:none;user-select:none;">{rows_html}{more_line}</div>
         <div style="
             position:absolute;top:0;left:0;right:0;bottom:0;
             display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -445,7 +407,7 @@ def render_hero() -> None:
             max-width:480px;
             line-height:1.6;
         ">
-            16 expert rules. 20 years of diesel field experience.<br>
+            17 expert rules. 20 years of diesel field experience.<br>
             No login. No credit card. See your highest-risk truck right now.
         </p>
     </div>
@@ -494,10 +456,10 @@ def render_upload_form() -> tuple[str | None, bytes | None]:
 
 # ── CTA section ───────────────────────────────────────────────────────────────
 
-def render_cta(email: str, fleet_size: int = 0) -> None:
+def render_cta(email: str, fleet_size: int, worst_row: pd.Series, n_critical: int, n_high: int) -> None:
     """
-    Render the full-fleet CTA with per-truck pricing.
-    fleet_size pre-fills the truck count from the uploaded CSV.
+    Render the full-fleet CTA with per-truck pricing (informational only —
+    no checkout). fleet_size pre-fills the truck count from the uploaded CSV.
     """
     st.markdown("""
     <div style="border-top:1px solid #1a2130;margin-top:1.75rem;padding-top:1.5rem;">
@@ -556,26 +518,25 @@ def render_cta(email: str, fleet_size: int = 0) -> None:
         unsafe_allow_html=True,
     )
 
-    if st.button(
-        f"Start Free Trial — ${_total:,.2f}/mo after 14 days →",
+    if st.session_state.get("tg_landing_lead_captured"):
+        st.success(
+            "✓ Request received! We'll reach out within 1 business day to get "
+            f"{email} set up with a 14-day free trial."
+        )
+    elif st.button(
+        f"Request Access — ${_total:,.2f}/mo after 14-day trial →",
         type="primary",
         use_container_width=True,
     ):
-        with st.spinner("Opening secure checkout…"):
-            url, err = create_checkout_url(email, fleet_size=int(_size))
-        if err:
-            st.error(f"Checkout error: {err}")
-        elif url:
-            components.html(
-                f'<script>window.parent.location.href = "{url}";</script>',
-                height=0,
-                width=0,
-            )
+        with st.spinner("Submitting…"):
+            capture_lead(email, int(_size), worst_row, n_critical, n_high)
+        st.session_state["tg_landing_lead_captured"] = True
+        st.rerun()
 
     st.markdown("""
     <div style="font-family:'Barlow',sans-serif;font-size:0.75rem;color:#374151;
         text-align:center;margin-top:0.75rem;">
-        🔒 Secure checkout via Stripe · No card charged until day 15 · Cancel any time
+        No card required · We set up your account personally · Cancel any time
     </div>
     """, unsafe_allow_html=True)
 
@@ -591,7 +552,7 @@ def render_trust_bar() -> None:
     ">
         <div style="text-align:center;">
             <div style="font-family:'Barlow Condensed',sans-serif;font-size:1.4rem;
-                font-weight:800;color:#e8edf2;">16</div>
+                font-weight:800;color:#e8edf2;">17</div>
             <div style="font-family:'Barlow',sans-serif;font-size:0.72rem;
                 color:#4a6070;text-transform:uppercase;letter-spacing:0.08em;">Expert Rules</div>
         </div>
@@ -617,27 +578,6 @@ def render_trust_bar() -> None:
     """, unsafe_allow_html=True)
 
 
-# ── Checkout success banner ───────────────────────────────────────────────────
-
-def render_success_banner() -> None:
-    st.markdown("""
-    <div style="
-        background:rgba(67,160,71,0.08);
-        border:1px solid rgba(67,160,71,0.3);
-        border-left:4px solid #43a047;
-        border-radius:6px;
-        padding:1rem 1.25rem;
-        margin-bottom:1.5rem;
-        font-family:'Barlow',sans-serif;
-        font-size:0.9rem;
-        color:#43a047;
-    ">
-        ✓ <strong>Trial started!</strong>
-        Your 14-day free trial is active. Check your email for login instructions.
-    </div>
-    """, unsafe_allow_html=True)
-
-
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -647,12 +587,6 @@ def main() -> None:
         layout="centered",
     )
     inject_styles()
-
-    # Check for Stripe success redirect
-    params = st.query_params
-    if params.get("checkout") == "success":
-        render_success_banner()
-
     render_hero()
 
     # ── Upload form ───────────────────────────────────────────────────────────
@@ -741,7 +675,7 @@ def main() -> None:
     render_blurred_preview(scored_df, shown_vid=str(worst_row["vehicle_id"]))
 
     # CTA
-    render_cta(active_email, fleet_size=len(scored_df))
+    render_cta(active_email, len(scored_df), worst_row, n_critical, n_high)
 
     render_trust_bar()
 
