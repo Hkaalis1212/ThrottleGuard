@@ -6,7 +6,7 @@ The founder has ~20 years diesel technician experience (Detroit, Volvo/Mack, Cum
 Code must be practical, well-commented, and explainable to someone who knows trucks but not ML.
 
 ## Business Model
-- **Standalone SaaS** — per-fleet subscription via Stripe ($59.99/month or $575.90/year)
+- **Standalone SaaS** — per-fleet subscription via Stripe, priced per truck (see `PRICING_TIERS` in tg_subscription.py — single source of truth, check there before quoting a figure): Starter $39/truck/mo (1–10 trucks), Growth $29/truck/mo (11–50), Fleet $19/truck/mo (51–250), Enterprise (250+) custom quote, no automated checkout. No annual plan exists in the code — don't invent one.
 - **14-day free trial** — no credit card required, full access
 - **Optional bundle** with Fleet Optimizer (TruckFleetOptimizer) — gated by env var
 - ThrottleGuard MUST work fully standalone. Never hard-depend on Fleet Optimizer.
@@ -82,11 +82,12 @@ nh3_slip_detected, regen_active
 
 ## Tech Stack
 - **Dashboard**: Streamlit (app.py)
-- **Scoring**: dpf_expert_system.py (Dashboard tab), scoring_engine.py (Fleet Scores tab)
+- **Scoring**: dpf_expert_system.py (Dashboard tab) and scoring_engine.py (Fleet Scores tab, and tg_landing.py's lead-capture preview) are two independent implementations of the same 17 rules — see tests/ below. They have drifted before (a real bug, Rule 2 ignoring engine family in dpf_expert_system.py, shipped undetected until test coverage was added in 2026-10) — when changing a rule, change both and check the parallel test files still agree.
 - **Database**: Supabase PostgreSQL via psycopg2 (DATABASE_URL env var)
-- **Auth**: tg_auth.py — SHA-256 + per-user salt, roles: Admin / Technician / Viewer
+- **Auth**: tg_auth.py — PBKDF2-HMAC-SHA256 (260k iterations) + per-user salt, with a legacy plain-SHA-256 migration path for old hashes. Roles: Admin / Technician / Viewer
 - **Subscriptions**: tg_subscription.py — Stripe PaymentIntent, psycopg2 backend
-- **Hosting**: Railway — two services in one project: Streamlit (railway.toml) + FastAPI ingestion API (api.py, separate Railway service, start command: `uvicorn api:app --host 0.0.0.0 --port $PORT`)
+- **Sales/lead tracking**: HubSpot (optional, HUBSPOT_PRIVATE_APP_TOKEN) — see "Sales & Lead Tooling" below
+- **Hosting**: Railway — Streamlit (railway.toml) + FastAPI ingestion API (api.py, separate Railway service, start command: `uvicorn api:app --host 0.0.0.0 --port $PORT`) are both deployed. tg_landing.py (lead-capture landing page) is built and ready but is a third service that has to be deployed separately — check whether it's actually live before assuming so; see its module docstring for the start command and env vars.
 - **GitHub**: Hkaalis1212
 
 ## Database Tables (all prefixed tg_ to avoid collision with Fleet Optimizer)
@@ -109,22 +110,42 @@ ThrottleGuard/
 │                                     Motive adapter lives here; add Samsara/Geotab adapters here too
 ├── tg_motive_auth.py               ← Supabase-backed Motive token storage (tg_motive_tokens table)
 ├── dpf_expert_system.py            ← Scoring engine for Dashboard tab
-├── scoring_engine.py               ← Scoring engine for Fleet Scores tab
+├── scoring_engine.py               ← Scoring engine for Fleet Scores tab + tg_landing.py
 ├── throttleguard_engine_thresholds.py ← All numeric thresholds (single source of truth)
 ├── tg_auth.py                      ← User auth + login page + user management panel
 ├── tg_db.py                        ← Shared psycopg2 connection (get_conn())
-├── tg_subscription.py              ← Stripe subscription management
+├── tg_subscription.py              ← Stripe subscription management + PRICING_TIERS (source of truth for pricing)
 ├── outcome_db.py                   ← Prediction logging + outcome tracking
 ├── scored_dashboard.py             ← Fleet Scores tab UI
 ├── tg_demo_data.py                 ← 30-truck demo fleet (5 CRITICAL/8 HIGH/9 MEDIUM/8 LOW)
 ├── tg_logo.py                      ← Logo renderer
 ├── tg_tutorial.py                  ← In-app tutorial steps
+├── tg_landing.py                   ← Public lead-capture landing page (no login). CSV upload → score
+│                                     preview → "Request Access" into HubSpot. NOT self-serve checkout —
+│                                     see Subscription Gate's single-tenant note for why. Deploy as a
+│                                     3rd Railway service (see its own docstring); check if it's live.
+├── tg_hubspot_sync.py              ← push_trial_start() / push_landing_lead() — optional HubSpot
+│                                     sync, no-ops silently if HUBSPOT_PRIVATE_APP_TOKEN unset
+├── tg_trial_followup_cron.py       ← Daily GitHub Action (.github/workflows/tg-trial-followup.yml):
+│                                     reads HubSpot contacts with trial_start_date, drafts the due
+│                                     nurture-sequence email as a HubSpot Task (never auto-sends)
+├── .claude/skills/tg-promo-*/      ← Sales/marketing Claude Code skills — see "Sales & Lead Tooling"
+├── tests/                          ← pytest suite for both scoring engines (run: pytest tests/ -v)
 ├── .env                            ← Local secrets (never commit)
 ├── .env.example                    ← Documents all env vars
 ├── .gitignore
 ├── railway.toml                    ← Railway deploy config (Streamlit service only)
-└── requirements.txt
+├── requirements.txt
+└── requirements-dev.txt            ← requirements.txt + pytest
 ```
+
+**Built but not currently wired into the live app** — real code, not junk, but
+neither imported by app.py/api.py nor covered by tests. Confirm current status
+before relying on them: throttleguard_passive_regen.py (passive-regen health
+scoring — ECM never flags passive regen failure, this detects it from temp
+patterns instead) and throttleguard_scr_data_generator.py (synthetic DEF/SCR
+training data generator). Unlike the files in "Dead Code" below, these were
+never found to be broken or superseded — just never integrated.
 
 ## Telematics Ingestion Architecture
 api.py is the first adapter in a provider-agnostic ingestion layer.
@@ -132,6 +153,18 @@ api.py is the first adapter in a provider-agnostic ingestion layer.
 - Each provider gets normalize_<provider>_<event>() functions in that module
 - api.py routes webhook events to the right normalizer; output is always the canonical row shape
 - Adding Samsara or Geotab webhooks = new adapter functions in tg_telematics_adapters.py + new routes in api.py
+
+## Testing
+`pytest tests/ -v` (needs `pip install -r requirements-dev.txt`, or just
+`pip install pytest pandas` — the suite only exercises dpf_expert_system.py and
+scoring_engine.py, neither of which needs the rest of requirements.txt). 97 tests,
+structured in parallel across
+tests/test_dpf_expert_system.py and tests/test_scoring_engine.py — one fire/no-fire
+pair per rule per engine, plus gating, priority, and compound-bonus coverage. A
+GitHub Actions workflow (.github/workflows/tests.yml) runs this on every push/PR,
+but may show as stuck "queued" rather than passing or failing if the repo's free-plan
+Actions minutes are exhausted — that's a billing/quota state, not a code problem;
+verify by running the suite locally before concluding anything is actually broken.
 
 ## Dead Code (do not restore)
 - data_processing.py — v1 feature preprocessing (XGBoost pipeline, removed)
@@ -154,6 +187,7 @@ api.py is the first adapter in a provider-agnostic ingestion layer.
 | MOTIVE_SCOPES | No | API | Space-separated OAuth scopes (default: `vehicles.read hours_of_service.read`) |
 | THROTTLEGUARD_API_URL | No | Streamlit | Enables Fleet Optimizer integration (optional) |
 | THROTTLEGUARD_API_KEY | No | Streamlit | API key for Fleet Optimizer requests |
+| HUBSPOT_PRIVATE_APP_TOKEN | No | Streamlit, tg_landing.py, GitHub Action | HubSpot private app token (Settings → Integrations → Private Apps; scopes: crm.objects.contacts.read/write). Enables trial-start and landing-page-lead sync to HubSpot. Set separately in three places if you want all of it live: the Streamlit Railway service, the tg_landing.py Railway service (once deployed), and the `tg-trial-followup.yml` GitHub Actions secret — same token value, three independent settings. Everything no-ops silently without it. |
 
 ## Roles & Permissions
 | Role | upload | view | outcomes | manage_users | history |
@@ -164,16 +198,46 @@ api.py is the first adapter in a provider-agnostic ingestion layer.
 
 ## Subscription Gate
 Sits between auth and dashboard in app.py.
-- fleet_id = "admin" (one subscription per Railway deployment)
+- fleet_id = "admin" (one subscription per Railway deployment — single-tenant; see note below)
 - No active subscription → trial start page or upgrade page
 - Trial: 14 days free, full access, no card
-- Paid: monthly $59.99 or yearly $575.90 (18% off)
+- Paid: per-truck tiers (see Business Model above) — fleet size entered at checkout time
+
+**Single-tenant architecture note:** because fleet_id is hardcoded to "admin,"
+one Railway deployment serves exactly one paying customer — there's no concept
+of "customer #2" in the database. A new customer means a new deployment, set
+up manually. Don't build a self-serve signup/checkout flow that assumes
+otherwise without accounting for this (see tg_landing.py — it looks like it
+could do that and originally tried to, see Dead Code history/git log — it's
+lead-capture only now specifically because of this constraint).
 
 ## Fleet Optimizer Integration (optional)
 - File: TruckFleetOptimizer/throttleguard_integration.py
 - Enabled only when THROTTLEGUARD_API_URL env var is set
 - Currently calls /api/dpf-status — needs updating to read from tg_predictions in Supabase
 - Both apps share the same Supabase project (tg_ prefix prevents table collision)
+
+## Sales & Lead Tooling
+Built 2026-10, lives alongside the product code:
+- **.claude/skills/tg-promo-*/** — 10 Claude Code skills for sales/marketing work
+  (positioning, offer, content angles, lead magnets, prospect research, cold
+  outreach, objection handling, follow-up sequences, case studies, demo script).
+  Invoke with `/tg-promo-<name>`. Each is grounded in this file's real facts
+  (pricing, rule count, engine families) — if you edit pricing or rule counts
+  here, check whether any of these skills quote the old numbers.
+- **HubSpot** (optional, HUBSPOT_PRIVATE_APP_TOKEN) — stores leads/prospects as
+  Contacts, with fleet/duty-cycle detail as Notes and drafted outreach as Tasks
+  (never auto-sent — a human always reviews and sends).
+- **tg_hubspot_sync.py** — push_trial_start() fires from app.py when a real
+  trial starts; push_landing_lead() fires from tg_landing.py's "Request Access."
+  Both fail silently without the token — see Environment Variables.
+- **tg_trial_followup_cron.py** — daily GitHub Action, drafts the due step of a
+  6-stage trial nurture cadence (day 0/2/7/11/14/19) as a HubSpot Task per
+  contact. Matches tg-promo-followup's documented cadence — keep them in sync
+  if the cadence changes.
+- Gmail drafts have also been created ad hoc (via a connected Gmail MCP tool,
+  for cold outreach) but nothing in the committed code sends email directly —
+  every automated path here stops at "draft for human review," by design.
 
 ## Code Style
 1. Comments explain WHY not just WHAT
