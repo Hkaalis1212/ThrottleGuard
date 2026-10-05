@@ -7,8 +7,5 @@ python-dotenv
 psycopg2-binary
 stripe
 requests
-APScheduler
-twilio
-flask
 fastapi
 uvicorn[standard]
