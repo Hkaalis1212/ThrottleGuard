@@ -133,12 +133,11 @@ api.py is the first adapter in a provider-agnostic ingestion layer.
 - api.py routes webhook events to the right normalizer; output is always the canonical row shape
 - Adding Samsara or Geotab webhooks = new adapter functions in tg_telematics_adapters.py + new routes in api.py
 
-**Known SPN label conflict to resolve:** SPN 3226 is labeled "NOx Sensor upstream" in tg_telematics_adapters.py
-(matches SAE J1939 spec) but "Aftertreatment Outlet Temperature" in throttleguard_samsara_poller.py — one of these is wrong. Verify against real payloads before wiring NOx conversion scoring from either source.
-
 ## Dead Code (do not restore)
 - data_processing.py — v1 feature preprocessing (XGBoost pipeline, removed)
 - train_model.py — v1 model training (XGBoost, removed)
+- throttleguard_billing.py, tg_stripe_webhook.py — a second, never-wired-in Stripe billing path (separate `tg_billing` table, keyed by Stripe customer ID). Never imported by app.py or api.py — the live app bills through tg_subscription.py's PaymentIntent flow (tg_subscriptions table, keyed by fleet_id). Removed 2026-10 rather than finished, to stop two billing systems from silently drifting.
+- throttleguard_samsara_poller.py — a Samsara telematics integration, never wired into api.py (only Motive is live, via tg_telematics_adapters.py). Removed 2026-10. Re-add as a proper tg_telematics_adapters.py-style adapter if/when Samsara support is actually built, not by resurrecting this file.
 
 ## Environment Variables
 | Variable | Required | Service | Description |

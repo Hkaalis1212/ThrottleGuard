@@ -5,8 +5,7 @@ Shared normalization layer for telematics provider integrations.
 
 ThrottleGuard's scoring engine (scoring_engine.score_row / dpf_expert_system)
 takes ONE canonical row shape — the J1939-derived fields documented in
-CLAUDE.md's "CSV Input Columns" and produced today by
-throttleguard_samsara_poller.normalize_vehicle() for Samsara.
+CLAUDE.md's "CSV Input Columns".
 
 Every telematics provider (Motive, Samsara, Geotab, ...) is ultimately reporting
 the same SAE J1939 parameters (SPN/FMI) off the same trucks — so the SPN →
@@ -27,16 +26,7 @@ that converts that provider's payload into a (possibly partial) canonical row.
   signal at a time, so most canonical fields will be missing — callers merge
   partial rows into whatever's already known about that vehicle before scoring.
 - Keys prefixed with "_" are metadata for logging/merging, not scoring engine
-  inputs (mirrors the "_active_fault_spns" convention in the Samsara poller).
-
-KNOWN SPN LABEL DISCREPANCY
----------------------------
-SPN 3226 is labeled "NOx Sensor (upstream)" here (matches the SAE J1939
-"Aftertreatment 1 Outlet NOx" definition) but throttleguard_samsara_poller.py's
-DPF_SPN_LABELS lists it as "Aftertreatment Outlet Temperature" — those can't
-both be right. Worth a second look with real Motive/Samsara payloads in hand;
-not changed here since the Samsara poller is live and this isn't its bug to fix
-in isolation.
+  inputs.
 """
 
 import logging
