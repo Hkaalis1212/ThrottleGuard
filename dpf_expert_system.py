@@ -303,11 +303,16 @@ def calculate_expert_score(row: dict[str, Any]) -> dict[str, Any]:
 
     # Rule 2 -Peak temp too high → thermal shock / cracked substrate
     # GATED: peak temp reading is only meaningful during active regen
-    if regen_active and peak_temp > 1190:
+    # Engine-family-specific threshold (was hardcoded to a flat 1190°F —
+    # REGEN_HIGH_CRITICAL_F was imported but never wired in; fixed to match
+    # scoring_engine.py's already-correct implementation of this same rule)
+    peak_critical = REGEN_HIGH_CRITICAL_F.get(family, REGEN_HIGH_CRITICAL_F["DETROIT"])
+    if regen_active and peak_temp > peak_critical:
         score += 50
         failure_modes.append("THERMAL_SHOCK")
         reasons.append(
-            f"DPF peak temp {peak_temp:.0f}degF exceeds 1190degF limit -thermal damage risk"
+            f"DPF peak temp {peak_temp:.0f}degF exceeds {peak_critical:.0f}degF limit "
+            f"({family or 'DETROIT'} family) -thermal damage risk"
         )
 
     # Rule 3 -Sensor delta fault → inlet/outlet spread too wide at high temp
