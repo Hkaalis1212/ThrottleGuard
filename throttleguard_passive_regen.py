@@ -328,6 +328,70 @@ def apply_passive_regen_modifier(risk_tier: str, passive_score: float) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# INTEGRATION — layer passive regen onto an expert-system/scoring-engine result
+# ─────────────────────────────────────────────────────────────────────────────
+
+_VALID_FAMILIES = set(PASSIVE_REGEN_FLOOR_F)  # {'DETROIT', 'VOLVO_MACK', 'CUMMINS_PACCAR'}
+
+
+def layer_onto_scored_results(original_df: pd.DataFrame, results_df: pd.DataFrame,
+                               priority_col: str) -> pd.DataFrame:
+    """
+    Add passive_regen_score / passive_regen_failure / passive_failure_type /
+    passive_recommendation / adjusted_priority columns to a scoring engine's
+    output, using sensor fields from the original input rows.
+
+    engine_family is an OPTIONAL CSV column (see CLAUDE.md) and routinely
+    blank on real uploads. PASSIVE_REGEN_FLOOR_F only has DETROIT/VOLVO_MACK/
+    CUMMINS_PACCAR as keys and is indexed directly (not .get()) throughout
+    this module, so a blank/unrecognized family would raise KeyError — this
+    defaults it to CUMMINS_PACCAR (most conservative thresholds) instead,
+    matching score_fleet_passive_regen's own stated convention.
+
+    A priority value outside CRITICAL/HIGH/MEDIUM/LOW (e.g. dpf_expert_system's
+    "ERROR" for a row that failed required-field validation) is passed through
+    unmodified — there's no meaningful passive score for an unvalidated row,
+    and apply_passive_regen_modifier's score<=0.25 escalation isn't scoped to
+    only the four real tiers.
+
+    original_df and results_df must be row-aligned (same length and order) —
+    pass the caller's own input/output pair, not independently sorted or
+    filtered copies.
+    """
+    results_df = results_df.copy()
+    scores, failures, types, recs, adjusted = [], [], [], [], []
+
+    for orig_row, priority in zip(original_df.to_dict('records'), results_df[priority_col]):
+        if priority not in ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW'):
+            scores.append(None)
+            failures.append(None)
+            types.append(None)
+            recs.append(None)
+            adjusted.append(priority)
+            continue
+
+        family = orig_row.get('engine_family') or 'CUMMINS_PACCAR'
+        if family not in _VALID_FAMILIES:
+            family = 'CUMMINS_PACCAR'
+
+        score = calculate_passive_regen_score(orig_row, family)
+        info  = detect_passive_regen_failure(orig_row, family)
+
+        scores.append(score)
+        failures.append(info['failure_detected'])
+        types.append(info['failure_type'])
+        recs.append(info['recommendation'])
+        adjusted.append(apply_passive_regen_modifier(priority, score))
+
+    results_df['passive_regen_score']    = scores
+    results_df['passive_regen_failure']  = failures
+    results_df['passive_failure_type']   = types
+    results_df['passive_recommendation'] = recs
+    results_df['adjusted_priority']      = adjusted
+    return results_df
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # STANDALONE TEST
 # ─────────────────────────────────────────────────────────────────────────────
 

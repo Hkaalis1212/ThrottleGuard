@@ -234,6 +234,13 @@ def render_vehicle_expander(row: "pd.Series") -> None:
     reasons  = row.get("reasons", "") or ""
     action   = row.get("action", "") or ""
 
+    # Passive regen is an advisory signal that can move MEDIUM/LOW trucks —
+    # row["priority"] is already the adjusted value (see app.py's
+    # run_expert_system); priority_raw is only present when it differed.
+    priority_raw   = row.get("priority_raw")
+    passive_score  = row.get("passive_regen_score")
+    passive_rec    = row.get("passive_recommendation")
+
     with st.expander(
         f"{icon} {vid}  ·  {priority} ({score}/100)  ·  {fm}",
         expanded=(priority == "CRITICAL"),
@@ -283,6 +290,37 @@ def render_vehicle_expander(row: "pd.Series") -> None:
                         f'border-left:2px solid #1a2130;margin-bottom:3px;">{r}</div>',
                         unsafe_allow_html=True,
                     )
+
+        if passive_score is not None and pd.notna(passive_score):
+            st.markdown(
+                '<div style="font-family:\'Barlow Condensed\',sans-serif;'
+                'font-size:0.65rem;letter-spacing:0.12em;text-transform:uppercase;'
+                'color:#4a6070;margin:0.75rem 0 0.4rem;">Passive Regen Health</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;'
+                f'color:#8fa3b8;padding:3px 0 3px 0.75rem;'
+                f'border-left:2px solid #1a2130;margin-bottom:3px;">'
+                f'Score: {float(passive_score):.2f} / 1.00 '
+                f'(0 = silently failing · 1 = healthy highway cruise)</div>',
+                unsafe_allow_html=True,
+            )
+            if priority_raw is not None and priority_raw != priority:
+                st.markdown(
+                    f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;'
+                    f'color:#8fa3b8;padding:3px 0 3px 0.75rem;'
+                    f'border-left:2px solid #1a2130;margin-bottom:3px;">'
+                    f'Adjusted from <b>{priority_raw}</b> based on passive regen health</div>',
+                    unsafe_allow_html=True,
+                )
+            if passive_rec:
+                st.markdown(
+                    f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;'
+                    f'color:#8fa3b8;padding:3px 0 3px 0.75rem;'
+                    f'border-left:2px solid #1a2130;margin-bottom:3px;">{passive_rec}</div>',
+                    unsafe_allow_html=True,
+                )
 
 
 def render_dispatch_blocklist_styled(results: pd.DataFrame) -> None:

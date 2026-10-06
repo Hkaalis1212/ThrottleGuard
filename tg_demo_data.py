@@ -35,7 +35,7 @@ DEMO_TRUCKS = [
 
     {   # DPF: Rule 1 (+60) + Rule 4 (+30) + Rule 10 (+10). SCR: Rule 11 NOx critical (+40). Compound 1-Box (+20). Capped 100.
         # Compound aftertreatment failure — incomplete regen poisoned SCR catalyst
-        "vehicle_id": "TRK-001", "engine_family": "DETROIT",
+        "vehicle_id": "TRK-001", "engine_family": "DETROIT", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 867,   # well below 1000 — clear clogging
         "dpf_outlet_temp_peak_f": 1120,
         "dpf_inlet_temp_f": 980,
@@ -54,7 +54,7 @@ DEMO_TRUCKS = [
     },
     {   # DPF: Rule 1 (+60) + Rule 5 (+25) + Rule 6 (+25). SCR: Rule 14 DEF conc critical (+25). Compound (+15). Capped 100.
         # DEF tank contaminated — water substitution detected, catalyst starved of urea
-        "vehicle_id": "TRK-007", "engine_family": "VOLVO_MACK",
+        "vehicle_id": "TRK-007", "engine_family": "VOLVO_MACK", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 891,
         "dpf_outlet_temp_peak_f": 1080,
         "dpf_inlet_temp_f": 955,
@@ -73,7 +73,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 871, "def_concentration_pct": 17.8, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 1 (+60) + Rule 3 sensor fault (+70), capped 100. SCR: healthy — fault is DPF-side sensor only.
-        "vehicle_id": "TRK-012", "engine_family": "CUMMINS_PACCAR",
+        "vehicle_id": "TRK-012", "engine_family": "CUMMINS_PACCAR", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 430,   # <500 — impossible low
         "dpf_outlet_temp_peak_f": 1050,
         "dpf_inlet_temp_f": 1080,                # >1000 — sensor fault confirmed
@@ -92,7 +92,7 @@ DEMO_TRUCKS = [
     },
     {   # DPF: Rule 1 (+60) + Rule 4 (+30) + Rule 10 (+10). SCR: Rule 11 NOx critical (+40) + Rule 13 SCR cold (+15) + Rule 15 NH3 (+10). Compound (+15). Capped 100.
         # Full aftertreatment collapse — DPF clogged, SCR below light-off, catalyst non-functional
-        "vehicle_id": "TRK-019", "engine_family": "VOLVO_MACK",
+        "vehicle_id": "TRK-019", "engine_family": "VOLVO_MACK", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 843,   # very low — active clogging
         "dpf_outlet_temp_peak_f": 1090,
         "dpf_inlet_temp_f": 970,
@@ -111,7 +111,7 @@ DEMO_TRUCKS = [
     },
     {   # DPF: Rule 2 thermal shock (+50) + Rule 4 (+30). SCR: Rule 12 NOx warn (+20) + Compound 1-Box (+20). = 120 → capped 100.
         # Detroit 1-Box — thermal shock in shared housing degraded SCR catalyst
-        "vehicle_id": "TRK-023", "engine_family": "DETROIT",
+        "vehicle_id": "TRK-023", "engine_family": "DETROIT", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1010,
         "dpf_outlet_temp_peak_f": 1265,          # >1250 Detroit critical — thermal shock
         "dpf_inlet_temp_f": 1050,
@@ -134,7 +134,7 @@ DEMO_TRUCKS = [
     # ══════════════════════════════════════════════════════
 
     {   # DPF: Rule 4 (+30) + Rule 6 (+25) = 55. SCR: healthy.
-        "vehicle_id": "TRK-003", "engine_family": "CUMMINS_PACCAR",
+        "vehicle_id": "TRK-003", "engine_family": "CUMMINS_PACCAR", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1012,
         "dpf_outlet_temp_peak_f": 1080,
         "dpf_inlet_temp_f": 1010,
@@ -152,7 +152,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 992, "def_concentration_pct": 32.7, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 5 (+25) + Rule 6 EGR (+25) = 50. SCR: healthy.
-        "vehicle_id": "TRK-008", "engine_family": "VOLVO_MACK",
+        "vehicle_id": "TRK-008", "engine_family": "VOLVO_MACK", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1035,
         "dpf_outlet_temp_peak_f": 1140,
         "dpf_inlet_temp_f": 1060,
@@ -170,7 +170,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 1015, "def_concentration_pct": 32.4, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 4 (+30) + Rule 8 DEF contamination (+15) = 45. SCR: healthy.
-        "vehicle_id": "TRK-015", "engine_family": "DETROIT",
+        "vehicle_id": "TRK-015", "engine_family": "DETROIT", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1005,
         "dpf_outlet_temp_peak_f": 1100,
         "dpf_inlet_temp_f": 1020,
@@ -188,7 +188,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 985, "def_concentration_pct": 32.8, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 5 (+25) + Rule 6 EGR (+25) = 50. SCR: healthy.
-        "vehicle_id": "TRK-022", "engine_family": "CUMMINS_PACCAR",
+        "vehicle_id": "TRK-022", "engine_family": "CUMMINS_PACCAR", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1000,
         "dpf_outlet_temp_peak_f": 1110,
         "dpf_inlet_temp_f": 1005,
@@ -206,7 +206,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 980, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 4 (+30) + Rule 7 duty cycle (+15) = 45. SCR: healthy.
-        "vehicle_id": "TRK-027", "engine_family": "VOLVO_MACK",
+        "vehicle_id": "TRK-027", "engine_family": "VOLVO_MACK", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1045,
         "dpf_outlet_temp_peak_f": 1095,
         "dpf_inlet_temp_f": 1055,
@@ -224,7 +224,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 1025, "def_concentration_pct": 32.3, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 6 turbo (+25) + Rule 10 (+10) + Rule 8 DEF (+15) = 50. SCR: healthy.
-        "vehicle_id": "TRK-031", "engine_family": "DETROIT",
+        "vehicle_id": "TRK-031", "engine_family": "DETROIT", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1008,
         "dpf_outlet_temp_peak_f": 1130,
         "dpf_inlet_temp_f": 1025,
@@ -243,7 +243,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 988, "def_concentration_pct": 32.6, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 5 (+25) + Rule 9 fuel (+10) + Rule 10 (+10) = 45. SCR: healthy.
-        "vehicle_id": "TRK-035", "engine_family": "CUMMINS_PACCAR",
+        "vehicle_id": "TRK-035", "engine_family": "CUMMINS_PACCAR", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1015,
         "dpf_outlet_temp_peak_f": 1090,
         "dpf_inlet_temp_f": 1008,
@@ -261,7 +261,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 995, "def_concentration_pct": 32.7, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 4 (+30) + Rule 6 turbo (+25) = 55. SCR: healthy.
-        "vehicle_id": "TRK-041", "engine_family": "DETROIT",
+        "vehicle_id": "TRK-041", "engine_family": "DETROIT", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1020,
         "dpf_outlet_temp_peak_f": 1070,
         "dpf_inlet_temp_f": 1000,
@@ -284,7 +284,7 @@ DEMO_TRUCKS = [
     # ══════════════════════════════════════════════════════
 
     {   # DPF: Rule 7 duty (+15) + Rule 8 DEF contamination (+15) = 30. SCR: healthy.
-        "vehicle_id": "TRK-005", "engine_family": "VOLVO_MACK",
+        "vehicle_id": "TRK-005", "engine_family": "VOLVO_MACK", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1040,
         "dpf_outlet_temp_peak_f": 1085,
         "dpf_inlet_temp_f": 1050,
@@ -303,7 +303,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 1020, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 8 doser fault (+15) + Rule 9 filter (+10) = 25. SCR: healthy.
-        "vehicle_id": "TRK-009", "engine_family": "CUMMINS_PACCAR",
+        "vehicle_id": "TRK-009", "engine_family": "CUMMINS_PACCAR", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1002,
         "dpf_outlet_temp_peak_f": 1060,
         "dpf_inlet_temp_f": 1010,
@@ -322,7 +322,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 982, "def_concentration_pct": 32.8, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 7 duty (+15) + Rule 10 backpressure (+10) = 25. SCR: healthy.
-        "vehicle_id": "TRK-014", "engine_family": "DETROIT",
+        "vehicle_id": "TRK-014", "engine_family": "DETROIT", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1012,
         "dpf_outlet_temp_peak_f": 1095,
         "dpf_inlet_temp_f": 1018,
@@ -340,7 +340,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 992, "def_concentration_pct": 32.3, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 9 fuel (+10) + Rule 7 duty (+15) = 25. SCR: healthy.
-        "vehicle_id": "TRK-018", "engine_family": "VOLVO_MACK",
+        "vehicle_id": "TRK-018", "engine_family": "VOLVO_MACK", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1048,
         "dpf_outlet_temp_peak_f": 1100,
         "dpf_inlet_temp_f": 1055,
@@ -359,7 +359,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 1028, "def_concentration_pct": 32.6, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 8 DEF contamination (+15) + Rule 10 backpressure (+10) = 25. SCR: healthy.
-        "vehicle_id": "TRK-024", "engine_family": "CUMMINS_PACCAR",
+        "vehicle_id": "TRK-024", "engine_family": "CUMMINS_PACCAR", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1005,
         "dpf_outlet_temp_peak_f": 1070,
         "dpf_inlet_temp_f": 1012,
@@ -377,7 +377,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 985, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 7 duty (+15) + Rule 9 filter (+10) = 25. SCR: healthy.
-        "vehicle_id": "TRK-028", "engine_family": "DETROIT",
+        "vehicle_id": "TRK-028", "engine_family": "DETROIT", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1018,
         "dpf_outlet_temp_peak_f": 1090,
         "dpf_inlet_temp_f": 1022,
@@ -396,7 +396,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 998, "def_concentration_pct": 32.4, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 8 DEF contamination (+15) + Rule 9 water (+10) = 25. SCR: healthy.
-        "vehicle_id": "TRK-033", "engine_family": "VOLVO_MACK",
+        "vehicle_id": "TRK-033", "engine_family": "VOLVO_MACK", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1052,
         "dpf_outlet_temp_peak_f": 1095,
         "dpf_inlet_temp_f": 1060,
@@ -415,7 +415,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 1032, "def_concentration_pct": 32.7, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 7 duty (+15) + Rule 8 doser fault (+15) = 30. SCR: healthy.
-        "vehicle_id": "TRK-038", "engine_family": "CUMMINS_PACCAR",
+        "vehicle_id": "TRK-038", "engine_family": "CUMMINS_PACCAR", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1000,
         "dpf_outlet_temp_peak_f": 1060,
         "dpf_inlet_temp_f": 1008,
@@ -434,7 +434,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 980, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 9 filter (+10) + Rule 10 backpressure (+10) = 20. SCR: healthy.
-        "vehicle_id": "TRK-042", "engine_family": "DETROIT",
+        "vehicle_id": "TRK-042", "engine_family": "DETROIT", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1020,
         "dpf_outlet_temp_peak_f": 1080,
         "dpf_inlet_temp_f": 1025,
@@ -457,7 +457,7 @@ DEMO_TRUCKS = [
     # ══════════════════════════════════════════════════════
 
     {   # All healthy — 0 rules fire. Excellent NOx conversion.
-        "vehicle_id": "TRK-002", "engine_family": "DETROIT",
+        "vehicle_id": "TRK-002", "engine_family": "DETROIT", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1010,
         "dpf_outlet_temp_peak_f": 1120,
         "dpf_inlet_temp_f": 1025,
@@ -474,7 +474,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 990, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
     },
     {
-        "vehicle_id": "TRK-004", "engine_family": "VOLVO_MACK",
+        "vehicle_id": "TRK-004", "engine_family": "VOLVO_MACK", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1050,
         "dpf_outlet_temp_peak_f": 1100,
         "dpf_inlet_temp_f": 1060,
@@ -491,7 +491,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 1030, "def_concentration_pct": 32.6, "nh3_slip_detected": 0,
     },
     {
-        "vehicle_id": "TRK-006", "engine_family": "CUMMINS_PACCAR",
+        "vehicle_id": "TRK-006", "engine_family": "CUMMINS_PACCAR", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1012,
         "dpf_outlet_temp_peak_f": 1070,
         "dpf_inlet_temp_f": 1005,
@@ -508,7 +508,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 992, "def_concentration_pct": 32.4, "nh3_slip_detected": 0,
     },
     {
-        "vehicle_id": "TRK-010", "engine_family": "DETROIT",
+        "vehicle_id": "TRK-010", "engine_family": "DETROIT", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1005,
         "dpf_outlet_temp_peak_f": 1110,
         "dpf_inlet_temp_f": 1015,
@@ -525,7 +525,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 985, "def_concentration_pct": 32.7, "nh3_slip_detected": 0,
     },
     {
-        "vehicle_id": "TRK-016", "engine_family": "VOLVO_MACK",
+        "vehicle_id": "TRK-016", "engine_family": "VOLVO_MACK", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1045,
         "dpf_outlet_temp_peak_f": 1095,
         "dpf_inlet_temp_f": 1055,
@@ -542,7 +542,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 1025, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
     },
     {
-        "vehicle_id": "TRK-020", "engine_family": "CUMMINS_PACCAR",
+        "vehicle_id": "TRK-020", "engine_family": "CUMMINS_PACCAR", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1002,
         "dpf_outlet_temp_peak_f": 1065,
         "dpf_inlet_temp_f": 1010,
@@ -559,7 +559,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 982, "def_concentration_pct": 32.6, "nh3_slip_detected": 0,
     },
     {
-        "vehicle_id": "TRK-029", "engine_family": "DETROIT",
+        "vehicle_id": "TRK-029", "engine_family": "DETROIT", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1015,
         "dpf_outlet_temp_peak_f": 1105,
         "dpf_inlet_temp_f": 1020,
@@ -576,7 +576,7 @@ DEMO_TRUCKS = [
         "scr_inlet_temp_f": 995, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
     },
     {
-        "vehicle_id": "TRK-036", "engine_family": "VOLVO_MACK",
+        "vehicle_id": "TRK-036", "engine_family": "VOLVO_MACK", "regen_active": 1,
         "dpf_outlet_temp_active_regen_f": 1042,
         "dpf_outlet_temp_peak_f": 1088,
         "dpf_inlet_temp_f": 1052,
@@ -602,13 +602,28 @@ def get_demo_fleet() -> pd.DataFrame:
 
 def get_demo_scored() -> pd.DataFrame:
     """
-    Return the demo fleet pre-scored through scoring_engine.
-    Ready to pass directly to display_scored_dashboard().
+    Return the demo fleet pre-scored through scoring_engine, with passive
+    regen health layered on top. Ready to pass directly to
+    display_scored_dashboard().
+
+    Every demo truck has regen_active=1 (they're active-regen snapshots,
+    built to exercise the main 18-rule engine), so the passive module's
+    exhaust-temp and EGT-delta components stay neutral (0.5) for all of
+    them — correct behavior, since passive regen health genuinely can't be
+    assessed from a mid-regen reading. The remaining idle/regen-frequency/
+    fuel-quality components can't push any demo truck's score past the
+    0.80 (downgrade) or below the 0.25 (escalate) threshold on their own,
+    so adjusted_priority matches priority_label for the whole demo fleet —
+    it stays 5 CRITICAL/8 HIGH/9 MEDIUM/8 LOW either way.
     """
     from scoring_engine import score_row, SCORE_COLUMNS
+    from throttleguard_passive_regen import layer_onto_scored_results
 
     df = get_demo_fleet()
     df[SCORE_COLUMNS] = df.apply(score_row, axis=1)
+    df = layer_onto_scored_results(df, df, priority_col="priority_label")
+    df["priority_label_raw"] = df["priority_label"]
+    df["priority_label"]     = df["adjusted_priority"]
     return df
 
 
