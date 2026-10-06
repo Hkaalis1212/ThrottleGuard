@@ -146,6 +146,13 @@ def _fleet_table(df):
         trend      = str(row.get("score_trend", "→ Stable") or "→ Stable")
         trend_color = TREND_COLOR.get(trend, "#9e9e9e")
 
+        # Passive regen layer (throttleguard_passive_regen.py) — priority_label
+        # is already the adjusted value; priority_label_raw only differs when
+        # passive regen health moved a MEDIUM/LOW truck.
+        priority_raw  = row.get("priority_label_raw")
+        passive_score = row.get("passive_regen_score")
+        passive_rec   = row.get("passive_recommendation")
+
         with st.expander(
             f"{icon} **{vid}** — {p} ({score}/100) — {fm}  {trend}",
             expanded=(p == "CRITICAL"),
@@ -169,6 +176,10 @@ def _fleet_table(df):
                         f"**Trend:** <span style='color:{trend_color};font-weight:bold'>{trend}</span>",
                         unsafe_allow_html=True,
                     )
+                if passive_score is not None and pd.notna(passive_score):
+                    st.markdown(f"**Passive Regen:** `{float(passive_score):.2f} / 1.00`")
+                    if priority_raw is not None and priority_raw != p:
+                        st.caption(f"Adjusted from {priority_raw} based on passive regen health")
 
             with col2:
                 st.markdown("**Recommended Action:**")
@@ -183,6 +194,10 @@ def _fleet_table(df):
                     st.markdown("**Triggered Rules:**")
                     for rule in triggered.split(", "):
                         st.markdown(f"- {rule.strip()}")
+
+                if passive_rec:
+                    st.markdown("**Passive Regen Note:**")
+                    st.info(passive_rec)
 
 
 def _truck_detail(df):
@@ -205,6 +220,10 @@ def _truck_detail(df):
     trend      = str(truck.get("score_trend", "→ Stable") or "→ Stable")
     trend_color = TREND_COLOR.get(trend, "#9e9e9e")
 
+    priority_raw  = truck.get("priority_label_raw")
+    passive_score = truck.get("passive_regen_score")
+    passive_rec   = truck.get("passive_recommendation")
+
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Score",        f"{score}/100")
     c2.metric("Priority",     p)
@@ -216,6 +235,11 @@ def _truck_detail(df):
         unsafe_allow_html=True,
     )
 
+    if passive_score is not None and pd.notna(passive_score):
+        st.markdown(f"**Passive Regen Health:** `{float(passive_score):.2f} / 1.00`")
+        if priority_raw is not None and priority_raw != p:
+            st.caption(f"Adjusted from {priority_raw} based on passive regen health")
+
     st.markdown("**Recommended Action:**")
     if p in ("CRITICAL", "HIGH"):
         st.error(action)
@@ -223,6 +247,10 @@ def _truck_detail(df):
         st.warning(action)
     else:
         st.info(action)
+
+    if passive_rec:
+        st.markdown("**Passive Regen Note:**")
+        st.info(passive_rec)
 
     if triggered and triggered != "None":
         st.markdown("**Triggered Rules:**")

@@ -7,8 +7,11 @@ XGBoost removed — negative R2, 5% critical recall.
 Workflow:
   1. Upload CSV with DPF sensor / service columns
   2. Expert system scores every row
-  3. Results displayed by priority, with reasons and actions
-  4. Every prediction logged to Supabase PostgreSQL for future validation
+  3. Passive regen health (throttleguard_passive_regen.py) is logged, then
+     layered on top — it can only adjust MEDIUM/LOW tiers, never CRITICAL/HIGH
+  4. Results displayed by priority, with reasons and actions
+  5. Every prediction logged to Supabase PostgreSQL for future validation
+     (always the raw rule-engine priority, before the passive-regen layer)
 """
 
 from dotenv import load_dotenv
@@ -21,6 +24,7 @@ import plotly.express as px
 from datetime import date
 
 from dpf_expert_system import calculate_expert_score, REQUIRED_FIELDS, OPTIONAL_FIELDS
+from throttleguard_passive_regen import layer_onto_scored_results
 from outcome_db import log_prediction, log_predictions_batch, init_db, get_predictions, record_outcome, get_validation_summary, get_calibration_data
 from tg_auth import init_auth_db, login_page, can_do, user_management_panel, get_or_create_google_user
 from auth import run_auth_gate, clear_auth_session
@@ -249,6 +253,14 @@ def run_expert_system(df: pd.DataFrame) -> pd.DataFrame:
         ])
     except Exception:
         pass  # logging failure must not block the UI
+
+    # Passive regen is an advisory signal layered on top of the hard-rule
+    # engine — it can only move MEDIUM/LOW trucks (never CRITICAL/HIGH), and
+    # is applied AFTER outcome logging above so Supabase always records the
+    # deterministic rule-engine's own priority for calibration tracking.
+    result_df = layer_onto_scored_results(df, result_df, priority_col="priority")
+    result_df["priority_raw"] = result_df["priority"]
+    result_df["priority"]     = result_df["adjusted_priority"]
 
     return result_df
 

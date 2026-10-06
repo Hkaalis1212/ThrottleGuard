@@ -121,6 +121,10 @@ ThrottleGuard/
 ├── outcome_db.py                   ← Prediction logging + outcome tracking
 ├── scored_dashboard.py             ← Fleet Scores tab UI
 ├── tg_demo_data.py                 ← 30-truck demo fleet (5 CRITICAL/8 HIGH/9 MEDIUM/8 LOW)
+├── throttleguard_passive_regen.py  ← Passive-regen health scoring (ECM never flags passive regen
+│                                     failure, this detects it from temp/idle/fuel patterns instead).
+│                                     Wired into both scoring paths via layer_onto_scored_results() —
+│                                     advisory only: can move MEDIUM/LOW tiers, never CRITICAL/HIGH
 ├── tg_logo.py                      ← Logo renderer
 ├── tg_tutorial.py                  ← In-app tutorial steps
 ├── tg_landing.py                   ← Public lead-capture landing page (no login). CSV upload → score
@@ -144,11 +148,42 @@ ThrottleGuard/
 
 **Built but not currently wired into the live app** — real code, not junk, but
 neither imported by app.py/api.py nor covered by tests. Confirm current status
-before relying on them: throttleguard_passive_regen.py (passive-regen health
-scoring — ECM never flags passive regen failure, this detects it from temp
-patterns instead) and throttleguard_scr_data_generator.py (synthetic DEF/SCR
-training data generator). Unlike the files in "Dead Code" below, these were
+before relying on them: throttleguard_scr_data_generator.py (synthetic DEF/SCR
+training data generator). Unlike the files in "Dead Code" below, this was
 never found to be broken or superseded — just never integrated.
+(throttleguard_passive_regen.py was in this category until 2026-10, when it
+was wired into both scoring paths — see Key Files above and "Passive Regen
+Integration" below.)
+
+## Passive Regen Integration
+`throttleguard_passive_regen.py`'s `layer_onto_scored_results(original_df,
+results_df, priority_col)` is called in two places:
+- `app.py`'s `run_expert_system()` (real CSV uploads, dpf_expert_system.py path)
+- `tg_demo_data.py`'s `get_demo_scored()` (demo fleet, scoring_engine.py path)
+
+It adds `passive_regen_score` / `passive_regen_failure` / `passive_failure_type`
+/ `passive_recommendation` / `adjusted_priority` columns, then both call sites
+overwrite the main `priority`/`priority_label` column with `adjusted_priority`
+and preserve the original under `priority_raw`/`priority_label_raw` — so every
+existing renderer (KPI counts, sorting, color-coding, dispatch blocklist) picks
+up the adjustment for free, while the raw rule-engine tier stays visible for
+audit and is what gets logged to `tg_predictions` for calibration tracking
+(logging happens from the pre-adjustment `results` list, before this layer
+runs — adjusted tiers are never what `outcome_db.py` records).
+
+**Safety invariant**: CRITICAL and HIGH are never moved by this layer — it can
+only downgrade MEDIUM→LOW (passive score ≥0.80) or escalate LOW→MEDIUM
+(passive score ≤0.25). `engine_family` is an optional CSV column and often
+blank; `layer_onto_scored_results()` defaults it to CUMMINS_PACCAR (most
+conservative) rather than crashing, since `PASSIVE_REGEN_FLOOR_F` indexes
+engine family directly and has no `DEFAULT`/`""` key.
+
+The demo fleet's 30 trucks are active-regen snapshots (`regen_active: 1`),
+so the module's exhaust-temp and EGT-delta components stay neutral for all of
+them by design — passive regen health genuinely can't be read from a mid-regen
+reading. The remaining idle/regen-frequency/fuel-quality components can't
+swing any demo truck's score past the 0.80/0.25 thresholds on their own, so
+the documented 5 CRITICAL/8 HIGH/9 MEDIUM/8 LOW split is unaffected.
 
 ## Telematics Ingestion Architecture
 api.py is the first adapter in a provider-agnostic ingestion layer.
@@ -159,12 +194,15 @@ api.py is the first adapter in a provider-agnostic ingestion layer.
 
 ## Testing
 `pytest tests/ -v` (needs `pip install -r requirements-dev.txt`, or just
-`pip install pytest pandas` — the suite only exercises dpf_expert_system.py and
-scoring_engine.py, neither of which needs the rest of requirements.txt). 105 tests,
-structured in parallel across
+`pip install pytest pandas` — the suite only exercises dpf_expert_system.py,
+scoring_engine.py, and throttleguard_passive_regen.py, none of which need the
+rest of requirements.txt). 126 tests: 105 structured in parallel across
 tests/test_dpf_expert_system.py and tests/test_scoring_engine.py — one fire/no-fire
-pair per rule per engine, plus gating, priority, and compound-bonus coverage. A
-GitHub Actions workflow (.github/workflows/tests.yml) runs this on every push/PR,
+pair per rule per engine, plus gating, priority, and compound-bonus coverage —
+and 21 in tests/test_passive_regen.py covering apply_passive_regen_modifier()'s
+CRITICAL/HIGH-never-move invariant and layer_onto_scored_results()'s integration
+(blank/missing engine_family, non-standard priority values, end-to-end escalation).
+A GitHub Actions workflow (.github/workflows/tests.yml) runs this on every push/PR,
 but may show as stuck "queued" rather than passing or failing if the repo's free-plan
 Actions minutes are exhausted — that's a billing/quota state, not a code problem;
 verify by running the suite locally before concluding anything is actually broken.
