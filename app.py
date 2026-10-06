@@ -903,7 +903,7 @@ def _render_landing():
     h1, h2, h3, h4 = st.columns(4)
     steps = [
         ("01", "Upload fleet data", "CSV from your telematics system or ELD export"),
-        ("02", "Expert system scores", "16 rules across DPF + SCR, 3 engine families"),
+        ("02", "Expert system scores", "18 rules across DPF + SCR, 3 engine families"),
         ("03", "See who needs action", "CRITICAL → HIGH → MEDIUM → LOW priority"),
         ("04", "Act on specific reasons", "Not a black box — every flag has a cause"),
     ]

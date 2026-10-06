@@ -8,7 +8,7 @@ Built on 20 years of field experience with Detroit, Volvo/Mack, and Cummins/PACC
 
 ## How it works
 
-ThrottleGuard uses a **16-rule expert system** — not a black box ML model. Every flag shows exactly which rule fired and what action to take. Rules cover the full aftertreatment system:
+ThrottleGuard uses an **18-rule expert system** — not a black box ML model. Every flag shows exactly which rule fired and what action to take. Rules cover the full aftertreatment system:
 
 - **DPF**: regen temperatures, backpressure, regen frequency, mileage, oil consumption, duty cycle
 - **SCR**: NOx conversion efficiency, catalyst inlet temp, DEF concentration, NH3 slip
@@ -36,13 +36,17 @@ Scoring is engine-family aware. Thermal thresholds differ between Detroit DD13/D
 
 ## Subscription
 
-| Plan | Price |
-|---|---|
-| Monthly | $59.99 / month |
-| Annual | $575.90 / year (18% off) |
-| Free trial | 14 days — full access, no credit card required |
+Priced per truck (see `PRICING_TIERS` in `tg_subscription.py` — the source of truth):
 
-Billing is handled by Stripe. One subscription per Railway deployment covers the full fleet.
+| Plan | Fleet size | Price |
+|---|---|---|
+| Starter | 1–10 trucks | $39/truck/mo |
+| Growth | 11–50 trucks | $29/truck/mo |
+| Fleet | 51–250 trucks | $19/truck/mo |
+| Enterprise | 250+ trucks | Custom quote (no automated checkout) |
+| Free trial | — | 14 days — full access, no credit card required |
+
+No annual plan. Billing is handled by Stripe. One subscription per Railway deployment covers the full fleet (fleet size is entered at checkout time).
 
 ---
 
