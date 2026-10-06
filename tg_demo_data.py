@@ -21,7 +21,11 @@ import pandas as pd
 
 # ── Demo fleet definition ─────────────────────────────────────────────────────
 # Each dict = one truck. Values chosen to hit specific scoring rules.
-# See dpf_expert_system.py rules 1-10 for threshold reference.
+# See dpf_expert_system.py / scoring_engine.py (18 rules) for threshold reference.
+# scr_inlet_temp_f is kept within SCR_DPF_OUTLET_MAX_SPREAD_F (50°F) of
+# dpf_outlet_temp_active_regen_f on every truck not intentionally testing
+# Rule 17 (sensor fault) or Rule 13 (SCR cold) — SCR sits immediately
+# downstream of the DPF, so the two should track together during regen.
 
 DEMO_TRUCKS = [
 
@@ -32,7 +36,7 @@ DEMO_TRUCKS = [
     {   # DPF: Rule 1 (+60) + Rule 4 (+30) + Rule 10 (+10). SCR: Rule 11 NOx critical (+40). Compound 1-Box (+20). Capped 100.
         # Compound aftertreatment failure — incomplete regen poisoned SCR catalyst
         "vehicle_id": "TRK-001", "engine_family": "DETROIT",
-        "dpf_outlet_temp_active_regen_f": 867,   # well below 940 — clear clogging
+        "dpf_outlet_temp_active_regen_f": 867,   # well below 1000 — clear clogging
         "dpf_outlet_temp_peak_f": 1120,
         "dpf_inlet_temp_f": 980,
         "regen_count_7d": 4,                     # >2 — excessive
@@ -46,7 +50,7 @@ DEMO_TRUCKS = [
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 90,
         # SCR sensors — NOx breakthrough from HC poisoning the catalyst
         "nox_upstream_ppm": 480, "nox_downstream_ppm": 273, "nox_conversion_pct": 43,
-        "scr_inlet_temp_f": 565, "def_concentration_pct": 32.4, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 847, "def_concentration_pct": 32.4, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 1 (+60) + Rule 5 (+25) + Rule 6 (+25). SCR: Rule 14 DEF conc critical (+25). Compound (+15). Capped 100.
         # DEF tank contaminated — water substitution detected, catalyst starved of urea
@@ -66,9 +70,9 @@ DEMO_TRUCKS = [
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 120,
         # SCR sensors — critically diluted DEF (likely water contamination in tank)
         "nox_upstream_ppm": 510, "nox_downstream_ppm": 390, "nox_conversion_pct": 76,
-        "scr_inlet_temp_f": 488, "def_concentration_pct": 17.8, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 871, "def_concentration_pct": 17.8, "nh3_slip_detected": 0,
     },
-    {   # DPF: Rule 3 sensor fault (+70). SCR: healthy — fault is DPF-side sensor only.
+    {   # DPF: Rule 1 (+60) + Rule 3 sensor fault (+70), capped 100. SCR: healthy — fault is DPF-side sensor only.
         "vehicle_id": "TRK-012", "engine_family": "CUMMINS_PACCAR",
         "dpf_outlet_temp_active_regen_f": 430,   # <500 — impossible low
         "dpf_outlet_temp_peak_f": 1050,
@@ -84,7 +88,7 @@ DEMO_TRUCKS = [
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 75,
         # SCR sensors — healthy (DPF sensor fault, SCR functioning normally)
         "nox_upstream_ppm": 440, "nox_downstream_ppm": 44, "nox_conversion_pct": 90,
-        "scr_inlet_temp_f": 512, "def_concentration_pct": 32.6, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 460, "def_concentration_pct": 32.6, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 1 (+60) + Rule 4 (+30) + Rule 10 (+10). SCR: Rule 11 NOx critical (+40) + Rule 13 SCR cold (+15) + Rule 15 NH3 (+10). Compound (+15). Capped 100.
         # Full aftertreatment collapse — DPF clogged, SCR below light-off, catalyst non-functional
@@ -122,7 +126,7 @@ DEMO_TRUCKS = [
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 90,
         # SCR sensors — thermal event damaged catalyst in shared 1-Box housing
         "nox_upstream_ppm": 495, "nox_downstream_ppm": 228, "nox_conversion_pct": 54,
-        "scr_inlet_temp_f": 498, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 990, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
     },
 
     # ══════════════════════════════════════════════════════
@@ -131,7 +135,7 @@ DEMO_TRUCKS = [
 
     {   # DPF: Rule 4 (+30) + Rule 6 (+25) = 55. SCR: healthy.
         "vehicle_id": "TRK-003", "engine_family": "CUMMINS_PACCAR",
-        "dpf_outlet_temp_active_regen_f": 995,
+        "dpf_outlet_temp_active_regen_f": 1012,
         "dpf_outlet_temp_peak_f": 1080,
         "dpf_inlet_temp_f": 1010,
         "regen_count_7d": 3,
@@ -145,7 +149,7 @@ DEMO_TRUCKS = [
         "def_quality_ppm": 22, "def_doser_fault": 0,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 80,
         "nox_upstream_ppm": 420, "nox_downstream_ppm": 71, "nox_conversion_pct": 83,
-        "scr_inlet_temp_f": 538, "def_concentration_pct": 32.7, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 992, "def_concentration_pct": 32.7, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 5 (+25) + Rule 6 EGR (+25) = 50. SCR: healthy.
         "vehicle_id": "TRK-008", "engine_family": "VOLVO_MACK",
@@ -163,7 +167,7 @@ DEMO_TRUCKS = [
         "def_quality_ppm": 20, "def_doser_fault": 0,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 100,
         "nox_upstream_ppm": 465, "nox_downstream_ppm": 60, "nox_conversion_pct": 87,
-        "scr_inlet_temp_f": 562, "def_concentration_pct": 32.4, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 1015, "def_concentration_pct": 32.4, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 4 (+30) + Rule 8 DEF contamination (+15) = 45. SCR: healthy.
         "vehicle_id": "TRK-015", "engine_family": "DETROIT",
@@ -181,7 +185,7 @@ DEMO_TRUCKS = [
         "def_doser_fault": 0,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 70,
         "nox_upstream_ppm": 438, "nox_downstream_ppm": 75, "nox_conversion_pct": 83,
-        "scr_inlet_temp_f": 544, "def_concentration_pct": 32.8, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 985, "def_concentration_pct": 32.8, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 5 (+25) + Rule 6 EGR (+25) = 50. SCR: healthy.
         "vehicle_id": "TRK-022", "engine_family": "CUMMINS_PACCAR",
@@ -199,7 +203,7 @@ DEMO_TRUCKS = [
         "def_quality_ppm": 28, "def_doser_fault": 0,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 85,
         "nox_upstream_ppm": 448, "nox_downstream_ppm": 67, "nox_conversion_pct": 85,
-        "scr_inlet_temp_f": 518, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 980, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 4 (+30) + Rule 7 duty cycle (+15) = 45. SCR: healthy.
         "vehicle_id": "TRK-027", "engine_family": "VOLVO_MACK",
@@ -217,7 +221,7 @@ DEMO_TRUCKS = [
         "def_quality_ppm": 30, "def_doser_fault": 0,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 90,
         "nox_upstream_ppm": 455, "nox_downstream_ppm": 82, "nox_conversion_pct": 82,
-        "scr_inlet_temp_f": 550, "def_concentration_pct": 32.3, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 1025, "def_concentration_pct": 32.3, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 6 turbo (+25) + Rule 10 (+10) + Rule 8 DEF (+15) = 50. SCR: healthy.
         "vehicle_id": "TRK-031", "engine_family": "DETROIT",
@@ -236,11 +240,11 @@ DEMO_TRUCKS = [
         "def_doser_fault": 0,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 95,
         "nox_upstream_ppm": 442, "nox_downstream_ppm": 71, "nox_conversion_pct": 84,
-        "scr_inlet_temp_f": 530, "def_concentration_pct": 32.6, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 988, "def_concentration_pct": 32.6, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 5 (+25) + Rule 9 fuel (+10) + Rule 10 (+10) = 45. SCR: healthy.
         "vehicle_id": "TRK-035", "engine_family": "CUMMINS_PACCAR",
-        "dpf_outlet_temp_active_regen_f": 998,
+        "dpf_outlet_temp_active_regen_f": 1015,
         "dpf_outlet_temp_peak_f": 1090,
         "dpf_inlet_temp_f": 1008,
         "regen_count_7d": 1,
@@ -254,11 +258,11 @@ DEMO_TRUCKS = [
         "water_in_fuel_detected": 1,             # water in fuel fires
         "fuel_filter_change_frequency_days": 110,
         "nox_upstream_ppm": 430, "nox_downstream_ppm": 60, "nox_conversion_pct": 86,
-        "scr_inlet_temp_f": 522, "def_concentration_pct": 32.7, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 995, "def_concentration_pct": 32.7, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 4 (+30) + Rule 6 turbo (+25) = 55. SCR: healthy.
         "vehicle_id": "TRK-041", "engine_family": "DETROIT",
-        "dpf_outlet_temp_active_regen_f": 988,
+        "dpf_outlet_temp_active_regen_f": 1020,
         "dpf_outlet_temp_peak_f": 1070,
         "dpf_inlet_temp_f": 1000,
         "regen_count_7d": 3,
@@ -272,7 +276,7 @@ DEMO_TRUCKS = [
         "def_quality_ppm": 25, "def_doser_fault": 0,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 80,
         "nox_upstream_ppm": 452, "nox_downstream_ppm": 54, "nox_conversion_pct": 88,
-        "scr_inlet_temp_f": 558, "def_concentration_pct": 32.4, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 1000, "def_concentration_pct": 32.4, "nh3_slip_detected": 0,
     },
 
     # ══════════════════════════════════════════════════════
@@ -296,7 +300,7 @@ DEMO_TRUCKS = [
         "def_doser_fault": 0,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 80,
         "nox_upstream_ppm": 408, "nox_downstream_ppm": 45, "nox_conversion_pct": 89,
-        "scr_inlet_temp_f": 548, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 1020, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 8 doser fault (+15) + Rule 9 filter (+10) = 25. SCR: healthy.
         "vehicle_id": "TRK-009", "engine_family": "CUMMINS_PACCAR",
@@ -315,7 +319,7 @@ DEMO_TRUCKS = [
         "water_in_fuel_detected": 0,
         "fuel_filter_change_frequency_days": 40, # <45 — filter overdue
         "nox_upstream_ppm": 398, "nox_downstream_ppm": 44, "nox_conversion_pct": 89,
-        "scr_inlet_temp_f": 534, "def_concentration_pct": 32.8, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 982, "def_concentration_pct": 32.8, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 7 duty (+15) + Rule 10 backpressure (+10) = 25. SCR: healthy.
         "vehicle_id": "TRK-014", "engine_family": "DETROIT",
@@ -333,7 +337,7 @@ DEMO_TRUCKS = [
         "def_quality_ppm": 18, "def_doser_fault": 0,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 70,
         "nox_upstream_ppm": 418, "nox_downstream_ppm": 50, "nox_conversion_pct": 88,
-        "scr_inlet_temp_f": 552, "def_concentration_pct": 32.3, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 992, "def_concentration_pct": 32.3, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 9 fuel (+10) + Rule 7 duty (+15) = 25. SCR: healthy.
         "vehicle_id": "TRK-018", "engine_family": "VOLVO_MACK",
@@ -352,7 +356,7 @@ DEMO_TRUCKS = [
         "water_in_fuel_detected": 1,             # water in fuel
         "fuel_filter_change_frequency_days": 55,
         "nox_upstream_ppm": 412, "nox_downstream_ppm": 41, "nox_conversion_pct": 90,
-        "scr_inlet_temp_f": 540, "def_concentration_pct": 32.6, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 1028, "def_concentration_pct": 32.6, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 8 DEF contamination (+15) + Rule 10 backpressure (+10) = 25. SCR: healthy.
         "vehicle_id": "TRK-024", "engine_family": "CUMMINS_PACCAR",
@@ -370,7 +374,7 @@ DEMO_TRUCKS = [
         "def_doser_fault": 0,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 90,
         "nox_upstream_ppm": 435, "nox_downstream_ppm": 56, "nox_conversion_pct": 87,
-        "scr_inlet_temp_f": 528, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 985, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 7 duty (+15) + Rule 9 filter (+10) = 25. SCR: healthy.
         "vehicle_id": "TRK-028", "engine_family": "DETROIT",
@@ -389,7 +393,7 @@ DEMO_TRUCKS = [
         "water_in_fuel_detected": 0,
         "fuel_filter_change_frequency_days": 38, # <45
         "nox_upstream_ppm": 422, "nox_downstream_ppm": 34, "nox_conversion_pct": 92,
-        "scr_inlet_temp_f": 562, "def_concentration_pct": 32.4, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 998, "def_concentration_pct": 32.4, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 8 DEF contamination (+15) + Rule 9 water (+10) = 25. SCR: healthy.
         "vehicle_id": "TRK-033", "engine_family": "VOLVO_MACK",
@@ -408,7 +412,7 @@ DEMO_TRUCKS = [
         "water_in_fuel_detected": 1,
         "fuel_filter_change_frequency_days": 75,
         "nox_upstream_ppm": 402, "nox_downstream_ppm": 44, "nox_conversion_pct": 89,
-        "scr_inlet_temp_f": 544, "def_concentration_pct": 32.7, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 1032, "def_concentration_pct": 32.7, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 7 duty (+15) + Rule 8 doser fault (+15) = 30. SCR: healthy.
         "vehicle_id": "TRK-038", "engine_family": "CUMMINS_PACCAR",
@@ -427,7 +431,7 @@ DEMO_TRUCKS = [
         "def_doser_fault": 1,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 90,
         "nox_upstream_ppm": 415, "nox_downstream_ppm": 37, "nox_conversion_pct": 91,
-        "scr_inlet_temp_f": 536, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 980, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
     },
     {   # DPF: Rule 9 filter (+10) + Rule 10 backpressure (+10) = 20. SCR: healthy.
         "vehicle_id": "TRK-042", "engine_family": "DETROIT",
@@ -445,7 +449,7 @@ DEMO_TRUCKS = [
         "water_in_fuel_detected": 0,
         "fuel_filter_change_frequency_days": 42,
         "nox_upstream_ppm": 428, "nox_downstream_ppm": 51, "nox_conversion_pct": 88,
-        "scr_inlet_temp_f": 558, "def_concentration_pct": 32.6, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 1000, "def_concentration_pct": 32.6, "nh3_slip_detected": 0,
     },
 
     # ══════════════════════════════════════════════════════
@@ -467,7 +471,7 @@ DEMO_TRUCKS = [
         "def_quality_ppm": 10, "def_doser_fault": 0,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 120,
         "nox_upstream_ppm": 390, "nox_downstream_ppm": 27, "nox_conversion_pct": 93,
-        "scr_inlet_temp_f": 572, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 990, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
     },
     {
         "vehicle_id": "TRK-004", "engine_family": "VOLVO_MACK",
@@ -484,11 +488,11 @@ DEMO_TRUCKS = [
         "def_quality_ppm": 8, "def_doser_fault": 0,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 150,
         "nox_upstream_ppm": 375, "nox_downstream_ppm": 19, "nox_conversion_pct": 95,
-        "scr_inlet_temp_f": 580, "def_concentration_pct": 32.6, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 1030, "def_concentration_pct": 32.6, "nh3_slip_detected": 0,
     },
     {
         "vehicle_id": "TRK-006", "engine_family": "CUMMINS_PACCAR",
-        "dpf_outlet_temp_active_regen_f": 995,
+        "dpf_outlet_temp_active_regen_f": 1012,
         "dpf_outlet_temp_peak_f": 1070,
         "dpf_inlet_temp_f": 1005,
         "regen_count_7d": 1,
@@ -501,7 +505,7 @@ DEMO_TRUCKS = [
         "def_quality_ppm": 12, "def_doser_fault": 0,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 90,
         "nox_upstream_ppm": 385, "nox_downstream_ppm": 31, "nox_conversion_pct": 92,
-        "scr_inlet_temp_f": 560, "def_concentration_pct": 32.4, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 992, "def_concentration_pct": 32.4, "nh3_slip_detected": 0,
     },
     {
         "vehicle_id": "TRK-010", "engine_family": "DETROIT",
@@ -518,7 +522,7 @@ DEMO_TRUCKS = [
         "def_quality_ppm": 15, "def_doser_fault": 0,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 100,
         "nox_upstream_ppm": 402, "nox_downstream_ppm": 24, "nox_conversion_pct": 94,
-        "scr_inlet_temp_f": 568, "def_concentration_pct": 32.7, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 985, "def_concentration_pct": 32.7, "nh3_slip_detected": 0,
     },
     {
         "vehicle_id": "TRK-016", "engine_family": "VOLVO_MACK",
@@ -535,7 +539,7 @@ DEMO_TRUCKS = [
         "def_quality_ppm": 9, "def_doser_fault": 0,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 130,
         "nox_upstream_ppm": 368, "nox_downstream_ppm": 18, "nox_conversion_pct": 95,
-        "scr_inlet_temp_f": 585, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 1025, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
     },
     {
         "vehicle_id": "TRK-020", "engine_family": "CUMMINS_PACCAR",
@@ -552,7 +556,7 @@ DEMO_TRUCKS = [
         "def_quality_ppm": 11, "def_doser_fault": 0,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 95,
         "nox_upstream_ppm": 378, "nox_downstream_ppm": 30, "nox_conversion_pct": 92,
-        "scr_inlet_temp_f": 562, "def_concentration_pct": 32.6, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 982, "def_concentration_pct": 32.6, "nh3_slip_detected": 0,
     },
     {
         "vehicle_id": "TRK-029", "engine_family": "DETROIT",
@@ -569,7 +573,7 @@ DEMO_TRUCKS = [
         "def_quality_ppm": 14, "def_doser_fault": 0,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 110,
         "nox_upstream_ppm": 395, "nox_downstream_ppm": 27, "nox_conversion_pct": 93,
-        "scr_inlet_temp_f": 575, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 995, "def_concentration_pct": 32.5, "nh3_slip_detected": 0,
     },
     {
         "vehicle_id": "TRK-036", "engine_family": "VOLVO_MACK",
@@ -586,7 +590,7 @@ DEMO_TRUCKS = [
         "def_quality_ppm": 7, "def_doser_fault": 0,
         "water_in_fuel_detected": 0, "fuel_filter_change_frequency_days": 140,
         "nox_upstream_ppm": 372, "nox_downstream_ppm": 22, "nox_conversion_pct": 94,
-        "scr_inlet_temp_f": 580, "def_concentration_pct": 32.4, "nh3_slip_detected": 0,
+        "scr_inlet_temp_f": 1022, "def_concentration_pct": 32.4, "nh3_slip_detected": 0,
     },
 ]
 
