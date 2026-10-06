@@ -14,7 +14,7 @@ Code must be practical, well-commented, and explainable to someone who knows tru
 ## Scoring Engine
 **NOT XGBoost. NOT ML.** ThrottleGuard v2 uses a rule-based expert system.
 
-- **17 rules** covering the full aftertreatment system (DPF + SCR)
+- **18 rules** covering the full aftertreatment system (DPF + SCR)
 - **3 engine families** with different thresholds: DETROIT, VOLVO_MACK, CUMMINS_PACCAR
 - Score 0–100 → priority: CRITICAL (≥60) / HIGH (≥35) / MEDIUM (≥15) / LOW (<15)
 - Every flag shows the exact rule that fired and a plain-English action
@@ -23,7 +23,7 @@ Code must be practical, well-commented, and explainable to someone who knows tru
 ### Rule summary
 | # | System | Trigger | Pts |
 |---|---|---|---|
-| 1 | DPF | Outlet temp <960°F during regen — clogging | 60 |
+| 1 | DPF | Outlet temp <1000°F during regen — incomplete burn (not always DPF — could be mechanical) | 60 |
 | 2 | DPF | Peak temp above family limit — thermal shock | 50 |
 | 3 | DPF | Sensor delta fault (inlet/outlet spread >100°F once either reaches 950°F) | 70 |
 | 4 | DPF | Regen count >2 in 7 days OR driver reports frequent regen | 30 |
@@ -41,6 +41,7 @@ Code must be practical, well-commented, and explainable to someone who knows tru
 | 15 | SCR | NH3 slip detected | 10 |
 | 16 | BOTH | Compound DPF+SCR failure (+20 Detroit 1-Box, +15 others) | 15–20 |
 | 17 | BOTH | SCR inlet vs. DPF outlet spread >50°F — sensor fault | 15 |
+| 18 | DPF | Outlet temp >1160°F during regen — worth checking | 15 |
 
 ## CSV Input Columns
 
@@ -59,7 +60,8 @@ nox_conversion_pct, scr_inlet_temp_f, def_concentration_pct,
 nh3_slip_detected, regen_active
 
 ## Engine Thresholds (throttleguard_engine_thresholds.py)
-- REGEN_OUTLET_CRITICAL_F = 960 (outlet temp below this during regen = clogging; revised 2026-07-02 from 940)
+- REGEN_OUTLET_CRITICAL_F = 1000 (outlet temp below this during regen = incomplete burn, not always DPF; revised 2026-10-06 from 960)
+- REGEN_ACTIVE_OUTLET_WATCH_HIGH_F = 1160 (outlet temp above this during regen = worth checking; Rule 18, added 2026-10-06, universal across families)
 - DIFF_PRESSURE_CRITICAL_PSI = 4.0 (backpressure limit, in.H2O)
 - REGEN_HIGH_CRITICAL_F: DETROIT=1250, VOLVO_MACK=1250, CUMMINS_PACCAR=1200
 - NOX_CONVERSION_CRITICAL_PCT = 50, NOX_CONVERSION_WARNING_PCT = 70
@@ -79,10 +81,11 @@ nh3_slip_detected, regen_active
 - Detroit 1-Box: DPF and SCR share single housing — thermal event damages both simultaneously
 - SCR catalyst requires >400°F inlet temp to activate urea chemistry (light-off threshold)
 - DEF spec: ISO 22241 — 32.5% urea ±1.5% (31–34% acceptable, <20% = water contamination)
+- Normal active-regen outlet range is 1000–1160°F; a low reading below 1000°F isn't always the DPF/DOC itself — could be a mechanical issue upstream (turbo, injectors, etc.) — action text must say so, not assume DPF clogging outright
 
 ## Tech Stack
 - **Dashboard**: Streamlit (app.py)
-- **Scoring**: dpf_expert_system.py (Dashboard tab) and scoring_engine.py (Fleet Scores tab, and tg_landing.py's lead-capture preview) are two independent implementations of the same 17 rules — see tests/ below. They have drifted before (a real bug, Rule 2 ignoring engine family in dpf_expert_system.py, shipped undetected until test coverage was added in 2026-10) — when changing a rule, change both and check the parallel test files still agree.
+- **Scoring**: dpf_expert_system.py (Dashboard tab) and scoring_engine.py (Fleet Scores tab, and tg_landing.py's lead-capture preview) are two independent implementations of the same 18 rules — see tests/ below. They have drifted before (a real bug, Rule 2 ignoring engine family in dpf_expert_system.py, shipped undetected until test coverage was added in 2026-10) — when changing a rule, change both and check the parallel test files still agree.
 - **Database**: Supabase PostgreSQL via psycopg2 (DATABASE_URL env var)
 - **Auth**: tg_auth.py — PBKDF2-HMAC-SHA256 (260k iterations) + per-user salt, with a legacy plain-SHA-256 migration path for old hashes. Roles: Admin / Technician / Viewer
 - **Subscriptions**: tg_subscription.py — Stripe PaymentIntent, psycopg2 backend
@@ -157,7 +160,7 @@ api.py is the first adapter in a provider-agnostic ingestion layer.
 ## Testing
 `pytest tests/ -v` (needs `pip install -r requirements-dev.txt`, or just
 `pip install pytest pandas` — the suite only exercises dpf_expert_system.py and
-scoring_engine.py, neither of which needs the rest of requirements.txt). 97 tests,
+scoring_engine.py, neither of which needs the rest of requirements.txt). 105 tests,
 structured in parallel across
 tests/test_dpf_expert_system.py and tests/test_scoring_engine.py — one fire/no-fire
 pair per rule per engine, plus gating, priority, and compound-bonus coverage. A

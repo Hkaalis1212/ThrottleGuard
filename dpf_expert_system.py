@@ -23,6 +23,7 @@ from typing import Any
 
 from throttleguard_engine_thresholds import (
     REGEN_OUTLET_CRITICAL_F,
+    REGEN_ACTIVE_OUTLET_WATCH_HIGH_F,
     REGEN_TRANSITION_FLOOR_F,
     REGEN_HIGH_WARNING_F,
     REGEN_HIGH_CRITICAL_F,
@@ -50,7 +51,7 @@ VERSION = "expert_system_v1"
 # Required fields -validation will fail without these
 REQUIRED_FIELDS = [
     "vehicle_id",
-    "dpf_outlet_temp_active_regen_f",   # Critical: <940degF = clogging
+    "dpf_outlet_temp_active_regen_f",   # Critical: <1000degF = clogging; >1160degF = watch
     "dpf_outlet_temp_peak_f",           # Critical: >1190degF = thermal shock
     "dpf_inlet_temp_f",                 # Used in sensor-fault delta check
     "regen_count_7d",                   # Regen frequency over 7 days
@@ -164,6 +165,15 @@ def get_action(score: int, priority: str, failure_mode: str, row: dict[str, Any]
             "Schedule DPF service within 24-48 hours. "
             "Risk of forced derate or limp-mode on next trip."
         )
+        try:
+            low_temp_flagged = float(outlet) < REGEN_OUTLET_CRITICAL_F
+        except (TypeError, ValueError):
+            low_temp_flagged = False
+        if low_temp_flagged:
+            action += (
+                " A low reading isn't always the DPF itself — check for a mechanical "
+                "cause upstream (turbo, injectors, etc.) before assuming DPF clogging."
+            )
         if one_box:
             action += " Detroit 1-Box: verify SCR catalyst condition during same service visit."
         return action
@@ -192,6 +202,17 @@ def get_action(score: int, priority: str, failure_mode: str, row: dict[str, Any]
         )
 
     # OPERATIONAL / general
+    try:
+        active_outlet = float(row.get("dpf_outlet_temp_active_regen_f", 0))
+    except (TypeError, ValueError):
+        active_outlet = 0
+    if failure_mode == "OPERATIONAL" and active_outlet > REGEN_ACTIVE_OUTLET_WATCH_HIGH_F:
+        return (
+            f"CHECK: Vehicle {vid} — active-regen outlet temp {active_outlet:.0f}°F is "
+            f"above the normal 1000-{REGEN_ACTIVE_OUTLET_WATCH_HIGH_F:.0f}°F range, though "
+            "not yet at Rule 2's thermal-shock threshold. Worth a look at next service."
+        )
+
     if priority == "HIGH":
         return (
             f"MONITOR: Vehicle {vid} — multiple operational risk factors active. "
@@ -294,6 +315,8 @@ def calculate_expert_score(row: dict[str, Any]) -> dict[str, Any]:
     # Rule 1 -Low outlet temp during active regen → incomplete burn / clogging
     # GATED: only fires when regen_active=1. Normal exhaust temps (400-700°F)
     # during cruise are NOT a DPF problem and must not trigger this rule.
+    # A low reading isn't always the DPF itself — could be mechanical
+    # (turbo, injectors, etc.) upstream of it; the action text says so.
     if regen_active and outlet_regen < REGEN_OUTLET_CRITICAL_F:
         score += 60
         failure_modes.append("CLOGGING")
@@ -505,6 +528,20 @@ def calculate_expert_score(row: dict[str, Any]) -> dict[str, Any]:
             f"spread exceeds {SCR_DPF_OUTLET_MAX_SPREAD_F}degF -possible temp sensor fault"
         )
 
+    # Rule 18 — Active-regen outlet temp too high (watch tier, below Rule 2's
+    # critical thermal-shock threshold). Different field than Rule 2: this is
+    # dpf_outlet_temp_active_regen_f (the steady active-regen reading), not
+    # dpf_outlet_temp_peak_f. Universal across families — not a stricter
+    # version of Rule 1, a companion high-side check on the same field.
+    # Field-validated: 2026-10-06.
+    if regen_active and outlet_regen > REGEN_ACTIVE_OUTLET_WATCH_HIGH_F:
+        score += 15
+        failure_modes.append("OPERATIONAL")
+        reasons.append(
+            f"DPF outlet temp {outlet_regen:.0f}degF during regen exceeds "
+            f"{REGEN_ACTIVE_OUTLET_WATCH_HIGH_F:.0f}degF watch threshold -worth checking"
+        )
+
     # ── 5. Finalise score and priority ────────────────────────────────────────
     risk_score = min(score, 100)
 
@@ -563,7 +600,7 @@ def _run_tests():
             "label": "Test 2 -Thermal shock + ash load",
             "data": {
                 "vehicle_id": "118",
-                "dpf_outlet_temp_active_regen_f": 960,
+                "dpf_outlet_temp_active_regen_f": 1050,
                 "dpf_outlet_temp_peak_f": 1250,          # Rule 2 -CRITICAL
                 "dpf_inlet_temp_f": 1100,
                 "regen_count_7d": 1,
@@ -593,8 +630,8 @@ def _run_tests():
             "label": "Test 4 -Low-risk / operational (short trips + DEF issue)",
             "data": {
                 "vehicle_id": "031",
-                "dpf_outlet_temp_active_regen_f": 980,
-                "dpf_outlet_temp_peak_f": 1020,
+                "dpf_outlet_temp_active_regen_f": 1030,
+                "dpf_outlet_temp_peak_f": 1080,
                 "dpf_inlet_temp_f": 890,
                 "regen_count_7d": 1,
                 "back_pressure_inh2o": 2.8,

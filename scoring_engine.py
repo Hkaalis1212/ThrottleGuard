@@ -15,6 +15,7 @@ import pandas as pd
 
 from throttleguard_engine_thresholds import (
     REGEN_OUTLET_CRITICAL_F,
+    REGEN_ACTIVE_OUTLET_WATCH_HIGH_F,
     REGEN_HIGH_CRITICAL_F,
     DIFF_PRESSURE_CRITICAL_PSI,
     ONE_BOX_FAMILIES,
@@ -73,6 +74,7 @@ RULE_LABELS = {
     "DEF_CONC_WARN":        "DEF concentration outside 31–34% urea spec",
     "NH3_SLIP":             "NH3 slip detected — excess ammonia bypassing SCR",
     "COMPOUND_ATS":         "Compound failure: DPF + SCR both flagged — full aftertreatment system",
+    "OUTLET_TEMP_HIGH_WATCH": f"Active-regen outlet temp high (>{REGEN_ACTIVE_OUTLET_WATCH_HIGH_F}°F) — watch",
 }
 
 
@@ -131,6 +133,15 @@ def generate_action(mode, row):
         )
     elif mode == "CLOGGING":
         action = "STOP. Do not dispatch. Incomplete regen detected. Schedule DPF service within 24-48 hours."
+        try:
+            low_temp_flagged = float(row.get('dpf_outlet_temp_active_regen_f', 0)) < REGEN_OUTLET_CRITICAL_F
+        except (TypeError, ValueError):
+            low_temp_flagged = False
+        if low_temp_flagged:
+            action += (
+                " A low reading isn't always the DPF itself — check for a mechanical "
+                "cause upstream (turbo, injectors, etc.) before assuming DPF clogging."
+            )
         if one_box:
             action += " Detroit 1-Box: verify SCR catalyst condition during same service visit."
         return action
@@ -147,6 +158,16 @@ def generate_action(mode, row):
     elif mode == "ASH_LOAD":
         return "Schedule DPF cleaning within 1-2 weeks. Check oil consumption logs."
     else:
+        try:
+            active_outlet = float(row.get('dpf_outlet_temp_active_regen_f', 0))
+        except (TypeError, ValueError):
+            active_outlet = 0
+        if mode == "OPERATIONAL" and active_outlet > REGEN_ACTIVE_OUTLET_WATCH_HIGH_F:
+            return (
+                f"CHECK. Active-regen outlet temp {active_outlet:.0f}°F is above the "
+                f"normal 1000-{REGEN_ACTIVE_OUTLET_WATCH_HIGH_F:.0f}°F range, though not "
+                "yet at Rule 2's thermal-shock threshold. Worth a look at next service."
+            )
         return "Monitor. Operational conditions may be contributing to DPF load."
 
 
@@ -312,6 +333,17 @@ def score_row(row, previous_score=None):
         score += 15
         failure_triggers.append("SCR_CATALYST")
         rule_labels.append(RULE_LABELS["SCR_DPF_SPREAD"])
+
+    # Rule 18: Active-regen outlet temp too high (watch tier, below Rule 2's
+    # critical thermal-shock threshold). Different field than Rule 2: this is
+    # dpf_outlet_temp_active_regen_f (the steady active-regen reading), not
+    # dpf_outlet_temp_peak_f. Universal across families — not a stricter
+    # version of Rule 1, a companion high-side check on the same field.
+    # Field-validated: 2026-10-06.
+    if regen_active and outlet_temp > REGEN_ACTIVE_OUTLET_WATCH_HIGH_F:
+        score += 15
+        failure_triggers.append("OPERATIONAL")
+        rule_labels.append(RULE_LABELS["OUTLET_TEMP_HIGH_WATCH"])
 
     score        = min(score, 100)
     failure_mode = determine_failure_mode(failure_triggers)

@@ -9,7 +9,7 @@ Generate positioning copy that is true to the product. Never invent capabilities
 
 ## Ground truth (always pull from here, not from memory of prior drafts)
 
-- **What it is**: a rule-based expert system for DPF + SCR predictive maintenance, not ML/AI in the black-box sense. 17 explicit rules across the full aftertreatment system, tuned per engine family (Detroit, Volvo/Mack, Cummins/PACCAR). Every flag names the exact rule that fired and a plain-English action.
+- **What it is**: a rule-based expert system for DPF + SCR predictive maintenance, not ML/AI in the black-box sense. 18 explicit rules across the full aftertreatment system, tuned per engine family (Detroit, Volvo/Mack, Cummins/PACCAR). Every flag names the exact rule that fired and a plain-English action.
 - **Who built it**: AHC Developers, founder has ~20 years as a diesel technician (Detroit, Volvo/Mack, Cummins/PACCAR). This is the single strongest trust signal — a shop-floor system built by someone who has actually pulled DPFs, not a software team guessing at thresholds.
 - **Business model**: standalone SaaS, 14-day free trial (no credit card required), then per-truck tiered pricing — $39/truck/mo (1-10 trucks), $29/truck/mo (11-50), $19/truck/mo (51-250), custom quote for 250+. Confirm current figures in `tg_subscription.py`'s `PRICING_TIERS` before quoting, since this is the fact most likely to drift. Optional bundle with Fleet Optimizer — never required.
 - **Who it's for**: commercial diesel fleets running Detroit, Volvo/Mack, or Cummins/PACCAR engines — fleet maintenance managers, shop owners, and owner-operators who want to catch DPF/SCR failures before a roadside derate or a $3-8k DPF replacement.

@@ -16,7 +16,7 @@ ThrottleGuard isn't a telematics replacement — it's a scoring layer on top of 
 Service intervals are scheduled, not predictive — the truck can go from fine to derated between visits. ThrottleGuard scores continuously (per upload/data pull), so it catches drift (e.g., regen requesting at progressively lower temps) between scheduled visits, when it's cheapest to act.
 
 **"This is just AI guessing — why would I trust a black box?"**
-It's the opposite of a black box: 17 explicit, named rules, tuned per engine family, and every flag shows exactly which rule fired and why (e.g., "Rule 11: NOx conversion <50% — EPA derate risk"). A tech can verify every score against what they already know. This is a genuine differentiator — lean into it, don't get defensive.
+It's the opposite of a black box: 18 explicit, named rules, tuned per engine family, and every flag shows exactly which rule fired and why (e.g., "Rule 11: NOx conversion <50% — EPA derate risk"). A tech can verify every score against what they already know. This is a genuine differentiator — lean into it, don't get defensive.
 
 **"That's more than I want to spend on software."** (pricing is per-truck tiered — $39/$29/$19 per truck/mo depending on fleet size, see tg_subscription.py)
 Anchor against the cost of one DPF replacement or one EPA derate roadside event — a single avoided incident pays for months to years of the subscription, and the per-truck rate drops as the fleet grows. Also remind them: 14-day trial, no card, so the cost of finding out if it's worth it is zero.

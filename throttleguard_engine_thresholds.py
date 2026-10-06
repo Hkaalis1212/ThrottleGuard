@@ -153,7 +153,20 @@ REGEN_TRANSITION_FLOOR_F = 930
 # Active regen CRITICAL trigger — outlet temp below this during regen = CRITICAL flag
 # Field-validated: 2026-03-23 — founder revised from 930 to 940°F
 # Field-validated: 2026-07-02 — founder revised from 940 to 960°F
-REGEN_OUTLET_CRITICAL_F = 960
+# Field-validated: 2026-10-06 — founder revised from 960 to 1000°F (DPF outlet
+# generally sits 1,015-1,050°F while soot is actively combusting; below 1000°F
+# the burn is incomplete regardless of family)
+REGEN_OUTLET_CRITICAL_F = 1000
+
+# Active regen HIGH-SIDE WATCH trigger (°F) — outlet temp above this during
+# regen = worth checking, universal across families. Separate from
+# REGEN_HIGH_CRITICAL_F below: that's the family-specific pull-truck threshold
+# on dpf_outlet_temp_PEAK_f; this is a lower-severity, earlier flag on
+# dpf_outlet_temp_ACTIVE_REGEN_f — a different field, not a stricter version
+# of the same check.
+# Field-validated: 2026-10-06 — founder: normal active-regen outlet range is
+# 1000-1160°F; above that, check it.
+REGEN_ACTIVE_OUTLET_WATCH_HIGH_F = 1160
 
 # High-side WARNING threshold (°F) — lower bound of observed field range
 # Elevated concern: monitor closely, consider pulling if temp is sustained
