@@ -19,10 +19,14 @@ These are field-observed ranges, not OEM spec sheet values.
 
 HOW IT WORKS:
 When regen_active = 0 (no commanded regen in progress), exhaust temps in the
-575-900°F range during highway operation indicate passive regen is occurring.
-Temps that stay below 550°F mean passive regen is NOT happening — soot builds
-silently. This module scores how well a truck's normal operation supports
-passive regen, and flags when it doesn't.
+passive regen range during highway operation indicate passive regen is
+occurring. That range is family-specific (see PASSIVE_REGEN_FLOOR_F /
+PASSIVE_REGEN_EFFECTIVE_HIGH_F in throttleguard_engine_thresholds.py):
+600-700°F for Detroit and Volvo/Mack, 575-900°F for Cummins/PACCAR (wider
+band — Cummins sustains higher EGTs under heavy highway load). Temps that
+stay below 550°F (universal failure floor, all families) mean passive regen
+is NOT happening — soot builds silently. This module scores how well a
+truck's normal operation supports passive regen, and flags when it doesn't.
 
 COLUMN NAMES:
 Uses the ThrottleGuard v2 CSV spec (see CLAUDE.md). Key inputs:
