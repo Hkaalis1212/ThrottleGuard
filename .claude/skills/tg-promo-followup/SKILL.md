@@ -23,7 +23,7 @@ Produce full sequences (subject/message + timing), not just one-off messages —
 
 **3. Demo/call no-show recovery**
 - Same-day: friendly "we missed you, want to reschedule" — no guilt-tripping.
-- +2-3 days: one value-forward follow-up (e.g., link to the 17-point checklist) instead of just "still want to talk?"
+- +2-3 days: one value-forward follow-up (e.g., link to the 18-point checklist) instead of just "still want to talk?"
 - +7 days: final reschedule offer, then move to long-term nurture cadence.
 
 **4. Trial-to-paid urgency (post-expiry, engaged but not converted)**

@@ -1,12 +1,16 @@
 """
 Tests for dpf_expert_system.py — the rule-based scoring engine behind the
-Dashboard tab. Each of the 17 rules gets a fires/does-not-fire pair, plus
+Dashboard tab. Each of the 18 rules gets a fires/does-not-fire pair, plus
 coverage of gating conditions, priority/failure-mode resolution, and
 engine-family-specific thresholds.
 """
 import pytest
 
 from dpf_expert_system import calculate_expert_score, validate_inputs, REQUIRED_FIELDS
+from throttleguard_engine_thresholds import (
+    REGEN_OUTLET_CRITICAL_F,
+    REGEN_ACTIVE_OUTLET_WATCH_HIGH_F,
+)
 
 
 # ── Validation ────────────────────────────────────────────────────────────────
@@ -30,14 +34,14 @@ def test_missing_required_field_returns_error_priority(healthy_row):
 # ── Rule 1: low outlet temp during regen → clogging ────────────────────────────
 
 def test_rule1_fires_below_outlet_critical(healthy_row):
-    row = healthy_row(dpf_outlet_temp_active_regen_f=959)
+    row = healthy_row(dpf_outlet_temp_active_regen_f=REGEN_OUTLET_CRITICAL_F - 1)
     result = calculate_expert_score(row)
     assert "CLOGGING" in result["reasons"] or result["failure_mode"] == "CLOGGING"
     assert result["risk_score"] >= 60
 
 
 def test_rule1_does_not_fire_at_outlet_critical(healthy_row):
-    row = healthy_row(dpf_outlet_temp_active_regen_f=960)
+    row = healthy_row(dpf_outlet_temp_active_regen_f=REGEN_OUTLET_CRITICAL_F)
     result = calculate_expert_score(row)
     assert "incomplete burn" not in result["reasons"]
 
@@ -329,6 +333,39 @@ def test_rule17_does_not_fire_within_spread(healthy_row):
     row = healthy_row(dpf_outlet_temp_active_regen_f=1000, scr_inlet_temp_f=1030)
     result = calculate_expert_score(row)
     assert "possible temp sensor fault" not in result["reasons"].lower()
+
+
+# ── Rule 18: active-regen outlet temp too high (watch tier) ─────────────────────
+
+def test_rule18_fires_above_watch_high(healthy_row):
+    row = healthy_row(dpf_outlet_temp_active_regen_f=REGEN_ACTIVE_OUTLET_WATCH_HIGH_F + 1)
+    result = calculate_expert_score(row)
+    assert "watch threshold" in result["reasons"].lower()
+    assert result["risk_score"] >= 15
+
+
+def test_rule18_does_not_fire_at_watch_high(healthy_row):
+    row = healthy_row(dpf_outlet_temp_active_regen_f=REGEN_ACTIVE_OUTLET_WATCH_HIGH_F)
+    result = calculate_expert_score(row)
+    assert "watch threshold" not in result["reasons"].lower()
+
+
+def test_rule18_gated_by_regen_active(healthy_row):
+    row = healthy_row(
+        dpf_outlet_temp_active_regen_f=REGEN_ACTIVE_OUTLET_WATCH_HIGH_F + 50,
+        regen_active=0,
+    )
+    result = calculate_expert_score(row)
+    assert "watch threshold" not in result["reasons"].lower()
+
+
+def test_rule18_action_mentions_outlet_temp(healthy_row):
+    row = healthy_row(
+        dpf_outlet_temp_active_regen_f=REGEN_ACTIVE_OUTLET_WATCH_HIGH_F + 1,
+        dpf_inlet_temp_f=REGEN_ACTIVE_OUTLET_WATCH_HIGH_F + 20,  # stay within Rule 3's spread
+    )
+    result = calculate_expert_score(row)
+    assert "active-regen outlet temp" in result["action"].lower()
 
 
 # ── Priority thresholds ──────────────────────────────────────────────────────────

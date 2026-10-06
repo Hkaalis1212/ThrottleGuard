@@ -9,9 +9,9 @@ First-touch messages only — for full multi-step sequences with timing, hand of
 
 ## Principles for first touch
 
-- Lead with the prospect's likely pain, not the product's feature list. A fleet maintenance manager doesn't care about "17 rules" on first contact — they care about "catch DPF failure before it derates a truck on the highway."
+- Lead with the prospect's likely pain, not the product's feature list. A fleet maintenance manager doesn't care about "18 rules" on first contact — they care about "catch DPF failure before it derates a truck on the highway."
 - One specific, credible detail beats generic claims — reference the founder's 20 years as a diesel tech, or a duty-cycle detail relevant to their operation (short-haul, engine family) if known.
-- One CTA, low commitment: "worth a 15-minute look?" or "want the 17-point checklist first?" (tg-promo-lead-magnet) rather than "buy now."
+- One CTA, low commitment: "worth a 15-minute look?" or "want the 18-point checklist first?" (tg-promo-lead-magnet) rather than "buy now."
 - Keep it short. Cold trucking-industry audiences respond to plain, direct, no-fluff language — match the technician tone from tg-promo-positioning, not corporate SaaS voice.
 
 ## Templates to produce

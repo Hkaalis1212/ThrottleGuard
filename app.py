@@ -955,9 +955,9 @@ def _render_landing():
         },
         {
             "vehicle_id": "TRUCK-002",
-            "dpf_outlet_temp_active_regen_f": 960,
+            "dpf_outlet_temp_active_regen_f": 1030,
             "dpf_outlet_temp_peak_f": 1080,
-            "dpf_inlet_temp_f": 950,
+            "dpf_inlet_temp_f": 1010,
             "regen_count_7d": 1,
             "back_pressure_inh2o": 1.9,
             "engine_family": "CUMMINS_PACCAR",

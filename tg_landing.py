@@ -407,7 +407,7 @@ def render_hero() -> None:
             max-width:480px;
             line-height:1.6;
         ">
-            17 expert rules. 20 years of diesel field experience.<br>
+            18 expert rules. 20 years of diesel field experience.<br>
             No login. No credit card. See your highest-risk truck right now.
         </p>
     </div>
@@ -552,7 +552,7 @@ def render_trust_bar() -> None:
     ">
         <div style="text-align:center;">
             <div style="font-family:'Barlow Condensed',sans-serif;font-size:1.4rem;
-                font-weight:800;color:#e8edf2;">17</div>
+                font-weight:800;color:#e8edf2;">18</div>
             <div style="font-family:'Barlow',sans-serif;font-size:0.72rem;
                 color:#4a6070;text-transform:uppercase;letter-spacing:0.08em;">Expert Rules</div>
         </div>

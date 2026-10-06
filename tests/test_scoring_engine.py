@@ -1,7 +1,7 @@
 """
 Tests for scoring_engine.py — the rule-based scoring engine behind the Fleet
 Scores tab and the landing page. Mirrors test_dpf_expert_system.py's
-coverage; the two engines implement the same 17 documented rules
+coverage; the two engines implement the same 18 documented rules
 independently, and historically have NOT stayed in sync (see Rule 2 in
 test_dpf_expert_system.py) — keeping both test files structurally parallel
 makes future drift between them easy to spot.
@@ -9,6 +9,10 @@ makes future drift between them easy to spot.
 import pytest
 
 from scoring_engine import score_row, SCORE_COLUMNS
+from throttleguard_engine_thresholds import (
+    REGEN_OUTLET_CRITICAL_F,
+    REGEN_ACTIVE_OUTLET_WATCH_HIGH_F,
+)
 
 
 def _result(row, previous_score=None):
@@ -18,13 +22,13 @@ def _result(row, previous_score=None):
 # ── Rule 1: low outlet temp during regen → clogging ────────────────────────────
 
 def test_rule1_fires_below_outlet_critical(healthy_row):
-    result = _result(healthy_row(dpf_outlet_temp_active_regen_f=959))
+    result = _result(healthy_row(dpf_outlet_temp_active_regen_f=REGEN_OUTLET_CRITICAL_F - 1))
     assert result["failure_mode"] == "CLOGGING"
     assert result["rule_score"] >= 60
 
 
 def test_rule1_does_not_fire_at_outlet_critical(healthy_row):
-    result = _result(healthy_row(dpf_outlet_temp_active_regen_f=960))
+    result = _result(healthy_row(dpf_outlet_temp_active_regen_f=REGEN_OUTLET_CRITICAL_F))
     assert "Low regen temp" not in result["triggered_rules"]
 
 
@@ -265,6 +269,35 @@ def test_rule17_fires_on_wide_scr_dpf_spread(healthy_row):
 def test_rule17_does_not_fire_within_spread(healthy_row):
     result = _result(healthy_row(dpf_outlet_temp_active_regen_f=1000, scr_inlet_temp_f=1030))
     assert "SCR inlet / DPF outlet temp spread" not in result["triggered_rules"]
+
+
+# ── Rule 18: active-regen outlet temp too high (watch tier) ─────────────────────
+
+def test_rule18_fires_above_watch_high(healthy_row):
+    result = _result(healthy_row(dpf_outlet_temp_active_regen_f=REGEN_ACTIVE_OUTLET_WATCH_HIGH_F + 1))
+    assert "outlet temp high" in result["triggered_rules"].lower()
+    assert result["rule_score"] >= 15
+
+
+def test_rule18_does_not_fire_at_watch_high(healthy_row):
+    result = _result(healthy_row(dpf_outlet_temp_active_regen_f=REGEN_ACTIVE_OUTLET_WATCH_HIGH_F))
+    assert "outlet temp high" not in result["triggered_rules"].lower()
+
+
+def test_rule18_gated_by_regen_active(healthy_row):
+    result = _result(healthy_row(
+        dpf_outlet_temp_active_regen_f=REGEN_ACTIVE_OUTLET_WATCH_HIGH_F + 50,
+        regen_active=0,
+    ))
+    assert "outlet temp high" not in result["triggered_rules"].lower()
+
+
+def test_rule18_action_mentions_outlet_temp(healthy_row):
+    result = _result(healthy_row(
+        dpf_outlet_temp_active_regen_f=REGEN_ACTIVE_OUTLET_WATCH_HIGH_F + 1,
+        dpf_inlet_temp_f=REGEN_ACTIVE_OUTLET_WATCH_HIGH_F + 20,  # stay within Rule 3's spread
+    ))
+    assert "active-regen outlet temp" in result["recommended_action"].lower()
 
 
 # ── Priority, confidence, trend ─────────────────────────────────────────────────
