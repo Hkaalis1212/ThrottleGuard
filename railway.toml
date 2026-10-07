@@ -2,8 +2,19 @@
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true"
-healthcheckPath = "/"
+# healthcheckPath hits Streamlit's script-health-check endpoint, which
+# actually runs app.py end-to-end (including the DB connection in
+# run_auth_gate() -> init_auth_db()) and returns 503 if it raises — not
+# just "/", which Streamlit serves as a static 200 before any Python
+# script runs, so it can't tell a dead database from a healthy deploy.
+# --server.scriptHealthCheckEnabled is an internal/experimental Streamlit
+# flag (see streamlit.config's server.scriptHealthCheckEnabled option) —
+# if a Streamlit upgrade removes or renames it, this falls back to always
+# serving 200 from "/" like before; watch for that on version bumps.
+# Railway only polls this at deploy time to gate traffic cutover, not as
+# an ongoing liveness probe, so this doesn't add continuous DB load.
+startCommand = "streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.scriptHealthCheckEnabled true"
+healthcheckPath = "/_stcore/script-health-check"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
