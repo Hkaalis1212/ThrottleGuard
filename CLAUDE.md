@@ -141,7 +141,15 @@ ThrottleGuard/
 ├── .env                            ← Local secrets (never commit)
 ├── .env.example                    ← Documents all env vars
 ├── .gitignore
-├── railway.toml                    ← Railway deploy config (Streamlit service only)
+├── railway.toml                    ← Railway deploy config (Streamlit service only). healthcheckPath
+│                                     hits Streamlit's /_stcore/script-health-check (an internal,
+│                                     experimental Streamlit option enabled via
+│                                     --server.scriptHealthCheckEnabled in startCommand) — it actually
+│                                     runs app.py end-to-end, so it returns 503 if the DB is
+│                                     unreachable. Plain "/" always returns 200 from Streamlit's static
+│                                     shell before any Python runs, so it can't gate a deploy on a dead
+│                                     DB — don't revert to it. If a future Streamlit upgrade drops this
+│                                     option, healthcheckPath silently degrades back to that behavior.
 ├── requirements.txt
 └── requirements-dev.txt            ← requirements.txt + pytest
 ```
