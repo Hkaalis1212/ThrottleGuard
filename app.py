@@ -38,7 +38,8 @@ from tg_subscription import (
 from tg_hubspot_sync import push_trial_start
 from tg_styles import (
     inject_styles,
-    PRIORITY_COLOR, PRIORITY_ORDER,
+    PRIORITY_COLOR, PRIORITY_TINT, PRIORITY_ORDER,
+    BG, BG_CARD, BG_SOFT, BORDER, TEXT_PRIMARY, TEXT_MUTED, NAVY, ORANGE,
     render_kpi_row,
     render_section_header,
     render_vehicle_expander,
@@ -268,29 +269,29 @@ def run_expert_system(df: pd.DataFrame) -> pd.DataFrame:
 # ── Chart helpers ─────────────────────────────────────────────────────────────
 
 def _chart_layout(fig, height=300):
-    """Apply consistent dark industrial chart theme."""
+    """Apply consistent warm, light chart theme."""
     fig.update_layout(
         height=height,
         paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="#0f1217",
-        font=dict(family="Barlow, sans-serif", color="#8fa3b8", size=11),
+        plot_bgcolor=BG_CARD,
+        font=dict(family="Barlow, sans-serif", color=TEXT_MUTED, size=11),
         margin=dict(t=36, b=10, l=10, r=10),
         title_font=dict(
             family="Barlow Condensed, sans-serif",
-            size=13,
-            color="#e8edf2",
+            size=14,
+            color=NAVY,
         ),
         title_x=0,
     )
     fig.update_xaxes(
-        gridcolor="#1a2130",
-        linecolor="#252d3a",
-        tickfont=dict(family="JetBrains Mono, monospace", size=10, color="#4a6070"),
+        gridcolor=BORDER,
+        linecolor=BORDER,
+        tickfont=dict(family="Barlow, sans-serif", size=10, color=TEXT_MUTED),
     )
     fig.update_yaxes(
-        gridcolor="#1a2130",
-        linecolor="#252d3a",
-        tickfont=dict(family="JetBrains Mono, monospace", size=10, color="#4a6070"),
+        gridcolor=BORDER,
+        linecolor=BORDER,
+        tickfont=dict(family="Barlow, sans-serif", size=10, color=TEXT_MUTED),
     )
     return fig
 
@@ -307,12 +308,12 @@ def render_priority_chart(results: pd.DataFrame):
     fig = px.bar(
         summary, x="Priority", y="Trucks", color="Priority",
         color_discrete_map=PRIORITY_COLOR,
-        title="FLEET HEALTH DISTRIBUTION",
+        title="Fleet Health Distribution",
         text="Trucks",
     )
     fig.update_traces(
         textposition="outside",
-        textfont=dict(family="JetBrains Mono, monospace", size=13, color="#e8edf2"),
+        textfont=dict(family="Barlow, sans-serif", size=13, color=NAVY),
         marker_line_width=0,
     )
     fig.update_layout(showlegend=False)
@@ -323,11 +324,11 @@ def render_priority_chart(results: pd.DataFrame):
 def render_score_histogram(results: pd.DataFrame):
     fig = px.histogram(
         results, x="risk_score", nbins=20,
-        title="RISK SCORE DISTRIBUTION",
+        title="Risk Score Distribution",
         labels={"risk_score": "Risk Score (0–100)"},
-        color_discrete_sequence=["#f57c00"],
+        color_discrete_sequence=[ORANGE],
     )
-    fig.update_traces(marker_line_color="#0f1217", marker_line_width=1)
+    fig.update_traces(marker_line_color=BG_CARD, marker_line_width=1)
     _chart_layout(fig, height=320)
     st.plotly_chart(fig, use_container_width=True)
 
@@ -337,13 +338,14 @@ def render_failure_mode_chart(results: pd.DataFrame):
     fm.columns = ["Failure Mode", "Count"]
     fig = px.pie(
         fm, names="Failure Mode", values="Count",
-        title="PREDICTED FAILURE MODES",
+        title="Predicted Failure Modes",
         hole=0.55,
-        color_discrete_sequence=["#e53935", "#f57c00", "#f9a825", "#43a047", "#546e7a"],
+        color_discrete_sequence=[PRIORITY_COLOR["CRITICAL"], PRIORITY_COLOR["HIGH"],
+                                  PRIORITY_COLOR["MEDIUM"], PRIORITY_COLOR["LOW"], TEXT_MUTED],
     )
     fig.update_traces(
         textfont=dict(family="Barlow Condensed, sans-serif", size=11),
-        marker=dict(line=dict(color="#080a0c", width=2)),
+        marker=dict(line=dict(color=BG_CARD, width=2)),
     )
     _chart_layout(fig, height=320)
     st.plotly_chart(fig, use_container_width=True)
@@ -366,39 +368,34 @@ def _render_dashboard_tab(results: pd.DataFrame, optional_present: list):
     if critical_count > 0:
         st.markdown(f"""
         <div style="
-            background: rgba(229,57,53,0.08);
-            border: 1px solid rgba(229,57,53,0.4);
-            border-left: 3px solid #e53935;
-            border-radius: 4px;
-            padding: 0.75rem 1.25rem;
+            background: {PRIORITY_TINT['CRITICAL']};
+            border-left: 3px solid {PRIORITY_COLOR['CRITICAL']};
+            border-radius: 10px;
+            padding: 0.8rem 1.25rem;
             margin-bottom: 1rem;
             font-family: 'Barlow Condensed', sans-serif;
-            font-size: 0.92rem;
+            font-size: 0.95rem;
             font-weight: 700;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
-            color: #e53935;
+            color: {PRIORITY_COLOR['CRITICAL']};
         ">⚠ {critical_count} of {total} vehicles require immediate attention — do not dispatch until inspected</div>
         """, unsafe_allow_html=True)
     else:
         st.markdown(f"""
         <div style="
-            background: rgba(67,160,71,0.06);
-            border: 1px solid rgba(67,160,71,0.25);
-            border-left: 3px solid #43a047;
-            border-radius: 4px;
-            padding: 0.75rem 1.25rem;
+            background: {PRIORITY_TINT['LOW']};
+            border-left: 3px solid {PRIORITY_COLOR['LOW']};
+            border-radius: 10px;
+            padding: 0.8rem 1.25rem;
             margin-bottom: 1rem;
             font-family: 'Barlow Condensed', sans-serif;
-            font-size: 0.85rem;
+            font-size: 0.9rem;
             font-weight: 600;
-            letter-spacing: 0.05em;
-            color: #43a047;
+            color: {PRIORITY_COLOR['LOW']};
         ">✓ Assessment complete — {total} vehicles scored. No critical alerts.</div>
         """, unsafe_allow_html=True)
 
     st.markdown(
-        f'<div style="font-family:\'JetBrains Mono\',monospace;font-size:0.72rem;color:#4a6070;margin-bottom:1rem;">'
+        f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.8rem;color:{TEXT_MUTED};margin-bottom:1rem;">'
         f'Optional columns detected: {len(optional_present)} / {len(OPTIONAL_FIELDS)}'
         f'{" · " + ", ".join(optional_present) if optional_present else ""}'
         f'</div>',
@@ -514,16 +511,15 @@ def _render_outcomes_tab():
     render_section_header("Log Outcome", "")
 
     if not pending:
-        st.markdown("""
+        st.markdown(f"""
         <div style="
-            background: rgba(67,160,71,0.06);
-            border: 1px solid rgba(67,160,71,0.25);
-            border-left: 3px solid #43a047;
-            border-radius: 4px;
-            padding: 0.85rem 1.25rem;
+            background: {PRIORITY_TINT['LOW']};
+            border-left: 3px solid {PRIORITY_COLOR['LOW']};
+            border-radius: 10px;
+            padding: 0.9rem 1.25rem;
             font-family: 'Barlow', sans-serif;
-            font-size: 0.88rem;
-            color: #43a047;
+            font-size: 0.9rem;
+            color: {PRIORITY_COLOR['LOW']};
         ">✓ No pending predictions — all logged predictions have been validated.</div>
         """, unsafe_allow_html=True)
     else:
@@ -540,8 +536,8 @@ def _render_outcomes_tab():
             row = label_to_row[selected_label]
 
             st.markdown(
-                f'<div style="font-family:\'JetBrains Mono\',monospace;font-size:0.82rem;'
-                f'color:#8fa3b8;margin:0.5rem 0;">'
+                f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.88rem;'
+                f'color:{TEXT_MUTED};margin:0.5rem 0;">'
                 f'Predicted: {row["predicted_failure_mode"]} · Risk score {row["risk_score"]}'
                 f'</div>',
                 unsafe_allow_html=True,
@@ -592,16 +588,15 @@ def _render_outcomes_tab():
     cal_data = get_calibration_data()
 
     if not summary:
-        st.markdown("""
+        st.markdown(f"""
         <div style="
-            background: rgba(84,110,122,0.08);
-            border: 1px solid #252d3a;
-            border-left: 3px solid #546e7a;
-            border-radius: 4px;
-            padding: 0.85rem 1.25rem;
+            background: {BG_SOFT};
+            border-left: 3px solid {TEXT_MUTED};
+            border-radius: 10px;
+            padding: 0.9rem 1.25rem;
             font-family: 'Barlow', sans-serif;
-            font-size: 0.88rem;
-            color: #8fa3b8;
+            font-size: 0.9rem;
+            color: {TEXT_MUTED};
         ">No validated predictions yet — accuracy stats appear here after outcomes are logged.</div>
         """, unsafe_allow_html=True)
     else:
@@ -633,15 +628,15 @@ def _render_outcomes_tab():
                 barmode="overlay",
                 opacity=0.75,
                 color_discrete_map={
-                    "Failure confirmed": "#e53935",
-                    "False alarm":       "#42a5f5",
+                    "Failure confirmed": PRIORITY_COLOR["CRITICAL"],
+                    "False alarm":       "#2563EB",
                 },
                 labels={"risk_score": "Risk Score", "count": "Predictions"},
             )
             for score, label, color in [
-                (60, "CRITICAL", "#e53935"),
-                (35, "HIGH",     "#f57c00"),
-                (15, "MEDIUM",   "#f9a825"),
+                (60, "CRITICAL", PRIORITY_COLOR["CRITICAL"]),
+                (35, "HIGH",     PRIORITY_COLOR["HIGH"]),
+                (15, "MEDIUM",   PRIORITY_COLOR["MEDIUM"]),
             ]:
                 fig.add_vline(
                     x=score, line_dash="dash", line_color=color, line_width=1.5,
@@ -654,9 +649,9 @@ def _render_outcomes_tab():
             st.plotly_chart(fig, use_container_width=True)
 
             st.markdown(
-                '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:0.7rem;'
-                'letter-spacing:0.1em;text-transform:uppercase;color:#4a6070;margin-bottom:0.5rem;">'
-                'Calibration Notes</div>',
+                f'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:0.78rem;'
+                f'font-weight:600;color:{TEXT_MUTED};margin-bottom:0.5rem;">'
+                f'Calibration Notes</div>',
                 unsafe_allow_html=True,
             )
             for _, row in summary_df.iterrows():
@@ -687,14 +682,14 @@ def _render_subscription_tab():
         st.session_state["_sub_info"] = get_subscription("admin")
     sub = st.session_state["_sub_info"]
     if sub:
-        status_color = "#43a047" if sub["status"] == "active" else "#e53935"
+        status_color = PRIORITY_COLOR["LOW"] if sub["status"] == "active" else PRIORITY_COLOR["CRITICAL"]
         st.markdown(
-            f'<div style="font-family:\'JetBrains Mono\',monospace;font-size:0.82rem;color:#8fa3b8;'
-            f'background:#0f1217;border:1px solid #252d3a;border-radius:4px;padding:0.7rem 1rem;margin-bottom:1rem;">'
-            f'Plan: <span style="color:#e8edf2;">{sub["plan_type"].upper()}</span> &nbsp;·&nbsp; '
-            f'Status: <span style="color:{status_color};">{sub["status"].upper()}</span> &nbsp;·&nbsp; '
-            f'Expires: <span style="color:#e8edf2;">{sub["end_date"][:10]}</span> &nbsp;·&nbsp; '
-            f'<span style="color:#f57c00;">{sub["days_remaining"]} days remaining</span>'
+            f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.88rem;color:{TEXT_MUTED};'
+            f'background:{BG_SOFT};border-radius:10px;padding:0.75rem 1.1rem;margin-bottom:1rem;">'
+            f'Plan: <span style="color:{NAVY};font-weight:600;">{sub["plan_type"].upper()}</span> &nbsp;·&nbsp; '
+            f'Status: <span style="color:{status_color};font-weight:600;">{sub["status"].upper()}</span> &nbsp;·&nbsp; '
+            f'Expires: <span style="color:{NAVY};font-weight:600;">{sub["end_date"][:10]}</span> &nbsp;·&nbsp; '
+            f'<span style="color:{ORANGE};font-weight:600;">{sub["days_remaining"]} days remaining</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -791,7 +786,7 @@ def _render_subscription_tab():
         )
     else:
         st.markdown(
-            '<div style="font-family:\'Barlow\',sans-serif;font-size:0.85rem;color:#4a6070;">No payments yet.</div>',
+            f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.88rem;color:{TEXT_MUTED};">No payments yet.</div>',
             unsafe_allow_html=True,
         )
 
@@ -803,23 +798,10 @@ def _render_landing():
 
     st.markdown("""
 <style>
-/* Force full viewport height and center content */
-.stApp {
-    background-color: #0e0e0e;
-}
-
 /* Remove default Streamlit padding that pushes content down */
 .block-container {
     padding-top: 0 !important;
     padding-bottom: 0 !important;
-}
-
-/* Full-height centering wrapper */
-[data-testid="stVerticalBlock"] > [style*="flex-direction: column"] > [data-testid="stVerticalBlock"] {
-    justify-content: center;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
 }
 
 /* Tighten the left-column bullet points */
@@ -835,9 +817,8 @@ def _render_landing():
     with col_hero:
         render_logo("large")
         st.markdown(
-            "<p style='text-align:center;font-family:\"Barlow Condensed\",sans-serif;"
-            "font-size:1rem;letter-spacing:0.15em;text-transform:uppercase;"
-            "color:#4a6070;margin:0.25rem 0 2rem;'>Know Before It Breaks</p>",
+            f"<p style='text-align:center;font-family:\"Barlow Condensed\",sans-serif;"
+            f"font-size:1.1rem;color:{TEXT_MUTED};margin:0.25rem 0 2rem;'>Know Before It Breaks</p>",
             unsafe_allow_html=True,
         )
 
@@ -850,46 +831,45 @@ def _render_landing():
             "A clogged DPF on the highway means a forced derate to 5 mph, "
             "an emergency tow, and $3,000–$8,000 in unplanned repair costs. "
             "ThrottleGuard flags the truck before it leaves the yard.",
-            "#e53935",
+            PRIORITY_COLOR["CRITICAL"],
         ),
         (
             "Plain-English Alerts",
             "Not fault codes. Not raw sensor numbers. Your dispatcher sees: "
             "TRK-001 — do not dispatch. Incomplete burn detected. "
             "Schedule DPF service within 24–48 hours.",
-            "#f57c00",
+            ORANGE,
         ),
         (
             "20 Years in the Field",
             "Every threshold — Detroit, Volvo/Mack, Cummins/PACCAR — is "
             "field-validated from real failure diagnosis, not OEM datasheets. "
             "The system knows what a failing DPF actually looks like.",
-            "#f9a825",
+            PRIORITY_COLOR["MEDIUM"],
         ),
     ]
 
     for col, (title, body, color) in zip([c1, c2, c3], value_props):
         col.markdown(f"""
         <div style="
-            background: #0f1217;
-            border: 1px solid #1a2130;
+            background: {BG_CARD};
+            border: 1px solid {BORDER};
             border-top: 3px solid {color};
-            border-radius: 6px;
-            padding: 1.25rem;
+            border-radius: 14px;
+            box-shadow: 0 1px 2px rgba(26,43,66,0.06), 0 1px 3px rgba(26,43,66,0.08);
+            padding: 1.4rem;
         ">
             <div style="
                 font-family: 'Barlow Condensed', sans-serif;
-                font-size: 1rem;
+                font-size: 1.1rem;
                 font-weight: 700;
-                letter-spacing: 0.06em;
-                text-transform: uppercase;
-                color: {color};
+                color: {NAVY};
                 margin-bottom: 0.6rem;
             ">{title}</div>
             <div style="
                 font-family: 'Barlow', sans-serif;
-                font-size: 0.85rem;
-                color: #8fa3b8;
+                font-size: 0.88rem;
+                color: {TEXT_MUTED};
                 line-height: 1.6;
             ">{body}</div>
         </div>
@@ -911,32 +891,31 @@ def _render_landing():
     for col, (num, title, desc) in zip([h1, h2, h3, h4], steps):
         col.markdown(f"""
         <div style="
-            background: #0f1217;
-            border: 1px solid #1a2130;
-            border-radius: 6px;
-            padding: 1rem;
+            background: {BG_CARD};
+            border: 1px solid {BORDER};
+            border-radius: 14px;
+            box-shadow: 0 1px 2px rgba(26,43,66,0.06), 0 1px 3px rgba(26,43,66,0.08);
+            padding: 1.2rem;
             text-align: center;
         ">
             <div style="
-                font-family: 'JetBrains Mono', monospace;
+                font-family: 'Barlow Condensed', sans-serif;
                 font-size: 1.8rem;
-                font-weight: 600;
-                color: #1a2130;
+                font-weight: 700;
+                color: {ORANGE};
                 margin-bottom: 0.3rem;
             ">{num}</div>
             <div style="
                 font-family: 'Barlow Condensed', sans-serif;
-                font-size: 0.9rem;
+                font-size: 1rem;
                 font-weight: 700;
-                letter-spacing: 0.06em;
-                text-transform: uppercase;
-                color: #e8edf2;
+                color: {NAVY};
                 margin-bottom: 0.3rem;
             ">{title}</div>
             <div style="
                 font-family: 'Barlow', sans-serif;
-                font-size: 0.78rem;
-                color: #4a6070;
+                font-size: 0.82rem;
+                color: {TEXT_MUTED};
                 line-height: 1.4;
             ">{desc}</div>
         </div>
@@ -1044,9 +1023,8 @@ def main():
     # ── Sidebar ───────────────────────────────────────────────────────────────
     with st.sidebar:
         st.markdown(
-            '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:1rem;'
-            'font-weight:700;letter-spacing:0.1em;text-transform:uppercase;'
-            'color:#e8edf2;margin-bottom:1rem;">Upload Fleet Data</div>',
+            f'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:1.1rem;'
+            f'font-weight:700;color:{NAVY};margin-bottom:1rem;">Upload Fleet Data</div>',
             unsafe_allow_html=True,
         )
 
@@ -1065,32 +1043,32 @@ def main():
         st.divider()
 
         st.markdown(
-            '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:0.7rem;'
-            'letter-spacing:0.1em;text-transform:uppercase;color:#4a6070;margin-bottom:0.4rem;">'
-            'Required Columns</div>',
+            f'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:0.78rem;'
+            f'font-weight:600;color:{TEXT_MUTED};margin-bottom:0.4rem;">'
+            f'Required Columns</div>',
             unsafe_allow_html=True,
         )
         for f in REQUIRED_FIELDS:
             st.markdown(
-                f'<code style="font-family:\'JetBrains Mono\',monospace;font-size:0.72rem;'
-                f'color:#f57c00;background:rgba(245,124,0,0.08);padding:1px 5px;'
-                f'border-radius:3px;display:inline-block;margin-bottom:2px;">{f}</code>',
+                f'<code style="font-family:\'Barlow\',sans-serif;font-size:0.75rem;'
+                f'color:{ORANGE};background:{PRIORITY_TINT["HIGH"]};padding:2px 7px;'
+                f'border-radius:6px;display:inline-block;margin-bottom:3px;">{f}</code>',
                 unsafe_allow_html=True,
             )
 
         st.divider()
 
         st.markdown(
-            '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:0.7rem;'
-            'letter-spacing:0.1em;text-transform:uppercase;color:#4a6070;margin-bottom:0.4rem;">'
-            'Optional Columns</div>',
+            f'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:0.78rem;'
+            f'font-weight:600;color:{TEXT_MUTED};margin-bottom:0.4rem;">'
+            f'Optional Columns</div>',
             unsafe_allow_html=True,
         )
         for f in OPTIONAL_FIELDS:
             st.markdown(
-                f'<code style="font-family:\'JetBrains Mono\',monospace;font-size:0.72rem;'
-                f'color:#546e7a;background:#0f1217;padding:1px 5px;border-radius:3px;'
-                f'display:inline-block;margin-bottom:2px;">{f}</code>',
+                f'<code style="font-family:\'Barlow\',sans-serif;font-size:0.75rem;'
+                f'color:{TEXT_MUTED};background:{BG_SOFT};padding:2px 7px;border-radius:6px;'
+                f'display:inline-block;margin-bottom:3px;">{f}</code>',
                 unsafe_allow_html=True,
             )
 
@@ -1162,7 +1140,7 @@ def main():
                     "Rename your CSV columns to match or add them before uploading."
                 )
                 st.markdown(
-                    f'<div style="font-family:\'JetBrains Mono\',monospace;font-size:0.78rem;color:#4a6070;">'
+                    f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;color:{TEXT_MUTED};">'
                     f'Columns found: {", ".join(df.columns.tolist())}</div>',
                     unsafe_allow_html=True,
                 )

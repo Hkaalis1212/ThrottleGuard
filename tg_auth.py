@@ -28,6 +28,7 @@ from datetime import datetime, timedelta
 import streamlit as st
 
 from tg_db import get_conn
+from tg_styles import inject_styles, TEXT_MUTED, TEXT_PRIMARY, NAVY, ORANGE, BORDER
 
 # ── Role permissions ──────────────────────────────────────────────────────────
 # Maps role name → set of allowed actions. Check with can_do(action).
@@ -334,6 +335,7 @@ def login_page(google_url: str | None = None) -> None:
         page_icon="🚛",
         layout="centered",
     )
+    inject_styles()
 
     # Push content to vertical center
     st.markdown("<div style='height: 8vh'></div>", unsafe_allow_html=True)
@@ -344,27 +346,27 @@ def login_page(google_url: str | None = None) -> None:
         from tg_logo import render_logo
         render_logo("medium")
         st.markdown(
-            """
+            f"""
             <div style="padding: 0.5rem 1rem 1rem 0;">
                 <div></div>
-                <hr style="border-color:#2d2d2d; margin-bottom:1.5rem">
-                <p style="color:#ccc; font-size:0.95rem; line-height:1.7; margin-bottom:1.2rem;">
-                    <b style="color:#FF6600">Know before it breaks.</b><br>
+                <hr style="border-color:{BORDER}; margin-bottom:1.5rem">
+                <p style="color:{TEXT_PRIMARY}; font-size:0.95rem; line-height:1.7; margin-bottom:1.2rem;">
+                    <b style="color:{ORANGE}">Know before it breaks.</b><br>
                     ThrottleGuard reads your fleet's J1939 sensor data and flags
                     DPF problems before they become roadside breakdowns — scoring
                     every truck <b>CRITICAL → HIGH → MEDIUM → LOW</b> with a
                     plain-English reason your dispatcher can act on immediately.
                 </p>
                 <div style="display:flex;flex-direction:column;gap:0.75rem">
-                    <div style="color:#ccc;font-size:0.88rem">
+                    <div style="color:{TEXT_PRIMARY};font-size:0.88rem">
                         🔴 <b>Stop unplanned breakdowns</b> — catch clogging, thermal shock,
                         and sensor faults before dispatch
                     </div>
-                    <div style="color:#ccc;font-size:0.88rem">
+                    <div style="color:{TEXT_PRIMARY};font-size:0.88rem">
                         ⚙️ <b>Built on 20 years in the field</b> — Detroit, Volvo/Mack,
                         Cummins/PACCAR thresholds field-validated by a master diesel tech
                     </div>
-                    <div style="color:#ccc;font-size:0.88rem">
+                    <div style="color:{TEXT_PRIMARY};font-size:0.88rem">
                         📋 <b>No black box</b> — every flag shows exactly which rule fired
                         and what action to take
                     </div>
@@ -381,7 +383,7 @@ def login_page(google_url: str | None = None) -> None:
                 <a href="{google_url}" style="
                     display:block;text-align:center;text-decoration:none;
                     background:#ffffff;color:#3c4043;
-                    border:1px solid #dadce0;border-radius:4px;
+                    border:1px solid #dadce0;border-radius:8px;
                     padding:0.6rem 1rem;margin-bottom:1rem;
                     font-family:'Barlow',sans-serif;font-size:0.95rem;font-weight:500;
                 ">
@@ -389,7 +391,7 @@ def login_page(google_url: str | None = None) -> None:
                          style="height:18px;vertical-align:middle;margin-right:8px;">
                     Sign in with Google
                 </a>
-                <div style="text-align:center;color:#555;font-size:0.8rem;margin-bottom:0.75rem;">
+                <div style="text-align:center;color:{TEXT_MUTED};font-size:0.8rem;margin-bottom:0.75rem;">
                     — or sign in with username —
                 </div>
                 """,
@@ -466,8 +468,8 @@ def login_page(google_url: str | None = None) -> None:
                         st.success("Password updated. You can now sign in.")
 
         st.markdown(
-            "<p style='text-align:center; color:#555; font-size:0.8rem; margin-top:2rem;'>"
-            "AHC Developers · ThrottleGuard v2</p>",
+            f"<p style='text-align:center; color:{TEXT_MUTED}; font-size:0.8rem; margin-top:2rem;'>"
+            f"AHC Developers · ThrottleGuard v2</p>",
             unsafe_allow_html=True,
         )
 

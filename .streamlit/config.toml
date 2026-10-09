@@ -5,3 +5,13 @@ enableXsrfProtection = false
 
 [browser]
 gatherUsageStats = false
+
+[theme]
+# Warm, customer-facing light theme — see tg_styles.py for the full token
+# set and the component CSS layered on top of these base values.
+base = "light"
+primaryColor = "#E8732A"
+backgroundColor = "#FAF8F5"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1A2B42"
+font = "sans serif"

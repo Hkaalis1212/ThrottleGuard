@@ -20,6 +20,8 @@ Usage:
 
 import streamlit as st
 
+from tg_styles import BG_CARD, BG_SOFT, BORDER, TEXT_PRIMARY, TEXT_MUTED, ORANGE, PRIORITY_TINT
+
 # ── Step definitions ──────────────────────────────────────────────────────────
 
 STEPS = [
@@ -195,7 +197,7 @@ def render_tutorial_sidebar():
 
     # Progress bar
     st.markdown(
-        f"<div style='font-size:0.75rem;color:#9ca3af;margin-bottom:4px'>"
+        f"<div style='font-size:0.78rem;color:{TEXT_MUTED};margin-bottom:4px'>"
         f"Step {step_num} of {TOTAL_STEPS}</div>",
         unsafe_allow_html=True,
     )
@@ -204,13 +206,14 @@ def render_tutorial_sidebar():
     # Step card
     st.markdown(
         f"""
-        <div style="background:#1a1f2e;border:1px solid #2d3748;border-left:3px solid #f59e0b;
-                    border-radius:8px;padding:1rem;margin:0.5rem 0">
+        <div style="background:{BG_CARD};border:1px solid {BORDER};border-left:3px solid {ORANGE};
+                    border-radius:12px;padding:1.1rem;margin:0.5rem 0;
+                    box-shadow:0 1px 2px rgba(26,43,66,0.06), 0 1px 3px rgba(26,43,66,0.08);">
             <div style="font-size:1.4rem">{step['icon']}</div>
-            <div style="font-weight:700;color:#ffffff;margin:0.3rem 0;font-size:0.95rem">
+            <div style="font-weight:700;color:{TEXT_PRIMARY};margin:0.3rem 0;font-size:0.98rem">
                 {step['title']}
             </div>
-            <div style="font-size:0.82rem;color:#9ca3af;line-height:1.5">
+            <div style="font-size:0.85rem;color:{TEXT_MUTED};line-height:1.5">
                 {step['body'].replace(chr(10), '<br>')}
             </div>
         </div>
@@ -286,16 +289,16 @@ def tutorial_callout(section: str):
 
     st.markdown(
         f"""
-        <div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.4);
-                    border-radius:8px;padding:0.75rem 1rem;margin-bottom:1rem;
+        <div style="background:{PRIORITY_TINT['HIGH']};
+                    border-radius:10px;padding:0.8rem 1.1rem;margin-bottom:1rem;
                     display:flex;align-items:flex-start;gap:0.75rem">
             <span style="font-size:1.3rem">{icon}</span>
             <div>
-                <span style="font-weight:700;color:#f59e0b;font-size:0.85rem">
+                <span style="font-weight:700;color:{ORANGE};font-size:0.87rem">
                     TOUR — Step {st.session_state.tg_tour_step + 1} of {TOTAL_STEPS}:
                     {step['title']}
                 </span><br>
-                <span style="color:#d1d5db;font-size:0.85rem">{label}</span>
+                <span style="color:{TEXT_PRIMARY};font-size:0.87rem">{label}</span>
             </div>
         </div>
         """,
