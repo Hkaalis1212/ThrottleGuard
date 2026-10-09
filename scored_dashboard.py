@@ -13,26 +13,31 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-PRIORITY_COLOR = {
-    "CRITICAL": "#d32f2f",
-    "HIGH":     "#f57c00",
-    "MEDIUM":   "#fbc02d",
-    "LOW":      "#388e3c",
-}
-PRIORITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+from tg_styles import PRIORITY_COLOR, PRIORITY_TINT, PRIORITY_ORDER, TEXT_MUTED, NAVY
+
 PRIORITY_ICON  = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢"}
 
 TREND_COLOR = {
-    "↑ Worsening": "#d32f2f",
-    "↓ Improving": "#388e3c",
-    "→ Stable":    "#9e9e9e",
+    "↑ Worsening": PRIORITY_COLOR["CRITICAL"],
+    "↓ Improving": PRIORITY_COLOR["LOW"],
+    "→ Stable":    TEXT_MUTED,
+}
+
+# Confidence is a separate concept from priority but reuses the same
+# HIGH/MEDIUM/LOW labels — kept as its own map rather than aliasing
+# PRIORITY_COLOR so the two can diverge without confusion.
+CONFIDENCE_COLOR = {
+    "HIGH":   PRIORITY_COLOR["CRITICAL"],
+    "MEDIUM": PRIORITY_COLOR["HIGH"],
+    "LOW":    PRIORITY_COLOR["LOW"],
 }
 
 
-def _badge(text, color):
+def _badge(text, color, tint=None):
+    tint = tint or f"{color}1A"  # ~10% tint fallback when no explicit tint given
     return (
-        f'<span style="background:{color};color:white;padding:2px 10px;'
-        f'border-radius:4px;font-weight:bold;font-size:0.82em">{text}</span>'
+        f'<span style="background:{tint};color:{color};padding:3px 10px;'
+        f'border-radius:999px;font-weight:700;font-size:0.82em">{text}</span>'
     )
 
 
@@ -76,10 +81,10 @@ def _alert_banner(df):
         st.error(f"🚨 **Immediate Attention Required — {len(urgent)} truck(s)**")
         for _, row in urgent.iterrows():
             icon  = PRIORITY_ICON.get(row["priority_label"], "")
-            color = PRIORITY_COLOR.get(row["priority_label"], "#757575")
+            color = PRIORITY_COLOR.get(row["priority_label"], TEXT_MUTED)
             st.markdown(
                 f"&nbsp;&nbsp;{icon} **Truck {row['vehicle_id']}** → "
-                + _badge(row["priority_label"], color)
+                + _badge(row["priority_label"], color, PRIORITY_TINT.get(row["priority_label"]))
                 + f" &nbsp;`{row['failure_mode']}`",
                 unsafe_allow_html=True,
             )
@@ -132,7 +137,7 @@ def _fleet_table(df):
 
     for _, row in sorted_df.iterrows():
         p      = row["priority_label"]
-        color  = PRIORITY_COLOR.get(p, "#757575")
+        color  = PRIORITY_COLOR.get(p, TEXT_MUTED)
         icon   = PRIORITY_ICON.get(p, "")
         score  = row["rule_score"]
         vid    = row["vehicle_id"]
@@ -144,7 +149,7 @@ def _fleet_table(df):
         triggered  = str(row.get("triggered_rules", "") or "")
         confidence = str(row.get("confidence", "") or "")
         trend      = str(row.get("score_trend", "→ Stable") or "→ Stable")
-        trend_color = TREND_COLOR.get(trend, "#9e9e9e")
+        trend_color = TREND_COLOR.get(trend, TEXT_MUTED)
 
         # Passive regen layer (throttleguard_passive_regen.py) — priority_label
         # is already the adjusted value; priority_label_raw only differs when
@@ -161,12 +166,12 @@ def _fleet_table(df):
 
             with col1:
                 st.markdown(
-                    f"**Priority:** {_badge(p, color)}", unsafe_allow_html=True
+                    f"**Priority:** {_badge(p, color, PRIORITY_TINT.get(p))}", unsafe_allow_html=True
                 )
                 st.markdown(f"**Score:** `{score} / 100`")
                 st.markdown(f"**Failure Mode:** `{fm}`")
                 if confidence:
-                    conf_color = {"HIGH": "#d32f2f", "MEDIUM": "#f57c00", "LOW": "#388e3c"}.get(confidence, "#757575")
+                    conf_color = CONFIDENCE_COLOR.get(confidence, TEXT_MUTED)
                     st.markdown(
                         f"**Confidence:** {_badge(confidence, conf_color)}",
                         unsafe_allow_html=True,
@@ -210,7 +215,7 @@ def _truck_detail(df):
     truck = sorted_df[sorted_df["vehicle_id"] == truck_id].iloc[0]
 
     p      = truck["priority_label"]
-    color  = PRIORITY_COLOR.get(p, "#757575")
+    color  = PRIORITY_COLOR.get(p, TEXT_MUTED)
     score  = truck["rule_score"]
     fm     = truck["failure_mode"]
     action = truck["recommended_action"]
@@ -218,7 +223,7 @@ def _truck_detail(df):
     triggered  = str(truck.get("triggered_rules", "") or "")
     confidence = str(truck.get("confidence", "") or "")
     trend      = str(truck.get("score_trend", "→ Stable") or "→ Stable")
-    trend_color = TREND_COLOR.get(trend, "#9e9e9e")
+    trend_color = TREND_COLOR.get(trend, TEXT_MUTED)
 
     priority_raw  = truck.get("priority_label_raw")
     passive_score = truck.get("passive_regen_score")
