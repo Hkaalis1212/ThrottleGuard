@@ -18,7 +18,7 @@ import pandas as pd
 # these constants so the two never drift apart.
 
 BG            = "#FAF8F5"   # page background — warm off-white, not stark white
-BG_CARD       = "#FFFFFF"   # card/surface background
+BG_CARD       = "#F6F5F3"   # card/surface background — soft grey, not stark white
 BG_SOFT       = "#F2EEE7"   # subtle inset panels (code-ish blocks, sidebar)
 BORDER        = "#E8E1D4"   # warm neutral border
 TEXT_PRIMARY  = "#1A2B42"   # deep navy — body text, headings
